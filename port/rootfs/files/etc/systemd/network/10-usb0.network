@@ -1,4 +1,5 @@
 # Maintenance link over the USB cable (the frame is 192.168.77.1, also reachable by IPv6 link-local).
+# A plugged-in computer gets an address by DHCP, but no route and no DNS through the frame.
 [Match]
 Name=usb0
 
@@ -9,3 +10,12 @@ RequiredForOnline=no
 Address=192.168.77.1/24
 LinkLocalAddressing=ipv6
 ConfigureWithoutCarrier=yes
+DHCPServer=yes
+
+[DHCPServer]
+PoolOffset=10
+PoolSize=20
+EmitDNS=no
+EmitRouter=no
+EmitNTP=no
+EmitTimezone=no

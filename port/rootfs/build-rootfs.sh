@@ -35,10 +35,11 @@ cp "$KEY" "$CTX/authorized_keys"
 cp port/firmware/nvram_ap6255.txt "$CTX/nvram_ap6255.txt"
 # The calendar app, laid out as calendar_app/deploy.sh installs it. Only the example config
 # goes in: the real one holds the secret calendar address and is added on the frame.
-python3 -m py_compile calendar_app/skycal/*.py
-mkdir -p "$CTX/skycal"
+python3 -m py_compile calendar_app/skycal/*.py calendar_app/skyadmin/*.py
+mkdir -p "$CTX/skycal" "$CTX/skyadmin"
 cp calendar_app/skycal/*.py "$CTX/skycal/"
-cp calendar_app/skycal.service calendar_app/config.example.toml "$CTX/"
+cp calendar_app/skyadmin/*.py "$CTX/skyadmin/"
+cp calendar_app/skycal.service calendar_app/skyadmin.service calendar_app/config.example.toml "$CTX/"
 
 docker build --platform linux/arm/v7 -t skylight-rootfs "$CTX"
 cid=$(docker create --platform linux/arm/v7 skylight-rootfs /bin/true)
@@ -64,13 +65,15 @@ docker export "$cid" | docker run --rm -i -v "$PWD/port/images":/img skylight-bu
     done
     for f in usr/lib/systemd/systemd sbin/init usr/sbin/sshd usr/sbin/wpa_supplicant usr/bin/python3 root/.ssh/authorized_keys \
              usr/lib/firmware/brcm/brcmfmac43455-sdio.bin usr/lib/firmware/brcm/brcmfmac43455-sdio.txt \
-             opt/skycal/skycal/frame.py etc/systemd/system/skycal.service etc/skycal/config.toml; do
+             opt/skycal/skycal/frame.py etc/systemd/system/skycal.service etc/skycal/config.toml \
+             opt/skycal/skyadmin/server.py etc/systemd/system/skyadmin.service; do
         [ -e "$f" ] || { echo "FAIL: $f missing from the root filesystem" >&2; exit 1; }
     done
     [ "$(stat -c %a root/.ssh)" = 700 ] && [ "$(stat -c %a root/.ssh/authorized_keys)" = 600 ] \
         || { echo "FAIL: ssh key modes" >&2; exit 1; }
     [ "$(stat -c %a:%u etc/skycal/config.toml)" = 600:0 ] || { echo "FAIL: calendar config must be root-only" >&2; exit 1; }
     [ -L etc/systemd/system/multi-user.target.wants/skycal.service ] || { echo "FAIL: skycal.service is not enabled" >&2; exit 1; }
+    [ -L etc/systemd/system/multi-user.target.wants/skyadmin.service ] || { echo "FAIL: skyadmin.service is not enabled" >&2; exit 1; }
     grep -q "^skycal:" etc/passwd || { echo "FAIL: no skycal user" >&2; exit 1; }
     grep -q "^root:[!*]" etc/shadow || { echo "FAIL: root password is not locked" >&2; exit 1; }
     echo "root filesystem MiB: $(du -sm . | cut -f1)"

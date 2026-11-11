@@ -61,6 +61,7 @@ There are no tests, linter config or CI. The build scripts check their own resul
 | `port/install_rootfs.py`, `port/tn.py` | Write the image over the bring-up telnet shell; address from `SKYLIGHT_HOST` |
 | `port/update_kernel.py` | Check and write a boot image to `boot` or `recovery` over SSH on a frame running Debian |
 | `calendar_app/skycal/` | Calendar: `feed.py` (iCalendar fetch and cache), `render.py` (week view), `frame.py` (framebuffer and touch loop), `__main__.py` (PNG output for development) |
+| `calendar_app/skyadmin/` | Settings web page on the USB cable network only (`http://192.168.77.1`): `server.py` (pages, request checks, system commands), `settings.py` (config TOML and Wi-Fi network list, atomic writes); unit `calendar_app/skyadmin.service` |
 
 Not in git, and needed to build: `skylight_backup/`, `port/firmware/` (Wi-Fi firmware and nvram from the backup), `tools/rkdeveloptool/`. Also not in git: `recon/out/`. Never commit anything unpacked from the stock firmware.
 

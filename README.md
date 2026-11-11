@@ -157,7 +157,7 @@ The link-local address may differ from the bring-up one; repeat the `ping6`. On 
 
 ### 9. Wi-Fi and the calendar (done once)
 
-On the frame:
+The easier way to do both is the settings page: see "Settings page over USB" below. By hand, on the frame:
 
 ```
 wpa_passphrase "NETWORK NAME" >> /etc/wpa_supplicant/wpa_supplicant-wlan0.conf
@@ -196,13 +196,24 @@ After this there is no adb. Access is SSH, over Wi-Fi or the USB cable.
 | Kernel build | Step 4 | `OK: zImage-dtb ...` |
 | Root filesystem build | Step 7 | `OK: port/images/rootfs.ext4` |
 
+## Settings page over USB
+
+For owners, no terminal needed:
+
+1. Plug the frame's micro-USB socket into a computer. The computer gets an address from the frame by itself.
+2. Open `http://192.168.77.1` in a browser.
+
+The page shows the Wi-Fi state, the frame's address and when the calendars were last fetched. It can join a Wi-Fi network, add and remove calendar feeds (shown masked, never in full), set the time zone, the first day of the week and the refresh interval, flip the touch axes, restart the calendar and restart the frame.
+
+There is no login: holding the cable is the key. The page listens on the cable's address only and the firewall admits it from `usb0` only, so it is unreachable over Wi-Fi. The computer keeps its own internet connection (the frame hands out no route and no DNS). Meant for macOS, where the page has been tested with the server in dry-run mode but not yet against a frame. Windows may not have a driver for this USB network type yet.
+
 ## Day to day
 
 | Task | How |
 |---|---|
 | Update the calendar app | On the Mac: `bash calendar_app/deploy.sh '<frame address>'` (never touches the config on the frame) |
 | Update the kernel | See "Updating the kernel" |
-| Change feeds or time zone | Edit `/etc/skycal/config.toml` on the frame, `systemctl restart skycal` |
+| Change Wi-Fi, feeds or time zone | The settings page over USB, or edit `/etc/skycal/config.toml` on the frame, `systemctl restart skycal` |
 | Logs | `journalctl -u skycal` on the frame |
 | OS updates | Automatic (unattended-upgrades) |
 | Change the bring-up init or kernel config | Rebuild the kernel: the kernel uses its built-in initramfs and ignores the one in the boot image |

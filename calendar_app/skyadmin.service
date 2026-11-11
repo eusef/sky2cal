@@ -1,0 +1,23 @@
+[Unit]
+Description=Skylight frame settings page (USB cable network only)
+After=network.target
+
+[Service]
+# Runs as root: it rewrites the root-only calendar and Wi-Fi configs and restarts services.
+# It listens on the usb0 address only, and the firewall admits port 80 from usb0 only.
+WorkingDirectory=/opt/skycal
+ExecStart=/usr/bin/python3 -m skyadmin
+# Restart=always also covers a start before usb0 has its address.
+Restart=always
+RestartSec=5
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/etc/skycal /etc/wpa_supplicant
+ProtectHome=yes
+PrivateTmp=yes
+# AF_UNIX for systemctl, AF_NETLINK for iw and ip.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+MemoryMax=64M
+
+[Install]
+WantedBy=multi-user.target
