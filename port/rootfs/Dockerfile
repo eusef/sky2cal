@@ -27,9 +27,15 @@ RUN find /usr/sbin/policy-rc.d -delete
 COPY files/ /
 COPY authorized_keys /root/.ssh/authorized_keys
 COPY nvram_ap6255.txt /usr/lib/firmware/brcm/brcmfmac43455-sdio.txt
+# The calendar app, in the same places calendar_app/deploy.sh uses (deploy.sh updates it later).
+COPY --chmod=644 skycal/*.py /opt/skycal/skycal/
+COPY --chmod=644 skycal.service /etc/systemd/system/skycal.service
+COPY --chmod=600 config.example.toml /etc/skycal/config.toml
 
 RUN set -e; \
     passwd -l root; \
+    useradd --system --no-create-home --shell /usr/sbin/nologin skycal; \
+    systemctl enable skycal.service; \
     install -d -m 700 /root/.ssh; \
     install -m 600 /root/.ssh/authorized_keys /root/.ssh/authorized_keys.new; \
     mv /root/.ssh/authorized_keys.new /root/.ssh/authorized_keys; \

@@ -48,6 +48,21 @@ if [ ! -x "$R/bin/busybox" ]; then
     install -m 755 "$bb" "$R/bin/busybox"
 fi
 install -m 755 "$SRC/initramfs/init" "$R/init"
+# Wireless regulatory database. cfg80211 is built in and asks for it about 2 s after power-on,
+# before any root filesystem is mounted, so the copy in Debian comes too late: it has to be in
+# the initramfs. The "-upstream" files carry the signature the kernel's built-in keys accept.
+RD=/build/regdb
+if [ ! -s "$RD/regulatory.db" ] || [ ! -s "$RD/regulatory.db.p7s" ]; then
+    mkdir -p /build/deb-regdb "$RD"
+    cd /build/deb-regdb
+    apt-get update -qq
+    apt-get download -qq wireless-regdb
+    dpkg -x wireless-regdb_*_all.deb x
+    db=$(find x -name regulatory.db-upstream | head -1)
+    [ -n "$db" ] && [ -s "$db" ] && [ -s "${db%-upstream}.p7s-upstream" ] || die "wireless-regdb has no upstream-signed database"
+    install -m 644 "$db" "$RD/regulatory.db"
+    install -m 644 "${db%-upstream}.p7s-upstream" "$RD/regulatory.db.p7s"
+fi
 # The binary is armhf and cannot run here; check the applet names inside it instead.
 for a in telnetd cttyhack setsid ifconfig devmem switch_root; do
     grep -a -q "$a" "$R/bin/busybox" || die "busybox has no '$a' applet, which init needs"
@@ -75,6 +90,8 @@ dir /lib/firmware 755 0 0
 dir /lib/firmware/brcm 755 0 0
 file /lib/firmware/brcm/brcmfmac43455-sdio.bin $FW/fw_bcm43455c0_ag.bin 644 0 0
 file /lib/firmware/brcm/brcmfmac43455-sdio.txt $FW/nvram_ap6255.txt 644 0 0
+file /lib/firmware/regulatory.db $RD/regulatory.db 644 0 0
+file /lib/firmware/regulatory.db.p7s $RD/regulatory.db.p7s 644 0 0
 EOF
 for a in sh mount umount mkdir echo cat ls dd sleep dmesg uname cut tr head grep ifconfig telnetd setsid cttyhack sync reboot poweroff ps free df vi hexdump devmem switch_root; do
     echo "slink /bin/$a busybox 777 0 0" >> /build/initramfs.list

@@ -141,3 +141,15 @@ Every chip needed for a display-only build has a mainline Linux driver (FACT, ch
 - FACT: the ring's bottom button reports `KEY_PREVIOUSSONG` and does not enter loader mode. Ring top is `KEY_NEXTSONG`, left `KEY_VOLUMEUP` (INFERRED from press order), centre `KEY_PLAYPAUSE`.
 - FACT: `boot` is mmcblk0p5 (12 MiB), `recovery` mmcblk0p6 (32 MiB), `misc` mmcblk0p2.
 - FACT: the mainline kernel uses its built-in initramfs (`CONFIG_INITRAMFS_SOURCE`); the ramdisk in the boot image is ignored, so an init change needs a kernel rebuild. Rescue images change only the DT bootargs (`port/mkrescue.sh`).
+
+## Slot offsets under the mainline kernel (FACT, 2026-11-11)
+
+- The mainline kernel exposes only the `user` partition, so the slots are reached as regions of `/dev/mmcblk0`: `boot` is raw sector 90112 (0x16000), 24576 sectors (12 MiB); `recovery` is raw sector 114688 (0x1C000), 65536 sectors (32 MiB). Read back over SSH, both regions had the md5 of the images flashed to those slots (b34fd6bdf94c7f700d99ec4e76cd15e8 and 693642960edc21ab95acbcb47009fe64).
+- `port/update_kernel.py` uses these offsets. Its checks-only mode passed against the frame; its write mode is untested.
+- Not known: how to start the `recovery` slot without Android's `adb reboot recovery`.
+
+## Wi-Fi regulatory data (2026-11-11)
+
+- FACT (kernel log, build 4): `cfg80211: failed to load regulatory.db` at 2.2 s. cfg80211 is built in and asks before the root filesystem is mounted, so Debian's copy in `/lib/firmware` is never seen and the regulatory domain stays at world (`country 00`).
+- Build 5 puts the upstream-signed `regulatory.db` and `regulatory.db.p7s` (Debian `wireless-regdb`) into the initramfs. FACT: both files are in the built ramdisk. INFERRED until flashed: the kernel accepts them and `iw reg get` shows the configured country.
+- FACT: brcmfmac also reports `no clm_blob available`. The fitted firmware is the vendor's 7.45.69 from 2017. INFERRED: there is no clm_blob matching it; Wi-Fi associates and works without one.

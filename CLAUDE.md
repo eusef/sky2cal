@@ -38,6 +38,8 @@ All run from the repository root on the Mac. `README.md` has the full sequence a
 | Check the packer against a stock image | `python3 port/rkimg.py selftest skylight_backup/<timestamp>/partitions/recovery.img` |
 | Pack a flashable image | `python3 port/rkimg.py mkboot --template <stock recovery.img or boot.img> --kernel port/out/zImage-dtb --ramdisk port/out/ramdisk.cpio.gz --out port/images/<name>.img` |
 | Rescue kernel (stays in the bring-up shell) | `bash port/mkrescue.sh` |
+| Check an image against a slot on a running frame (no write) | `python3 port/update_kernel.py <frame address> <recovery\|boot> <image>` |
+| Write that slot (owner runs this) | the same with `--write` |
 | Debian root filesystem image | `bash port/rootfs/build-rootfs.sh ~/.ssh/skylight_frame.pub` |
 | Write the root filesystem (erases `user`) | `SKYLIGHT_HOST='fe80::xxxx%enN' python3 port/install_rootfs.py` |
 | Deploy or update the calendar | `bash calendar_app/deploy.sh '<frame address>'` |
@@ -56,6 +58,7 @@ There are no tests, linter config or CI. The build scripts check their own resul
 | `port/rkimg.py` | Packs boot images the stock U-Boot accepts (Rockchip SHA-1 id, 4-byte length padding) |
 | `port/rootfs/` | Debian 13 armhf image: Dockerfile, overlay files, build script |
 | `port/install_rootfs.py`, `port/tn.py` | Write the image over the bring-up telnet shell; address from `SKYLIGHT_HOST` |
+| `port/update_kernel.py` | Check and write a boot image to `boot` or `recovery` over SSH on a frame running Debian |
 | `calendar_app/skycal/` | Calendar: `feed.py` (iCalendar fetch and cache), `render.py` (week view), `frame.py` (framebuffer and touch loop), `__main__.py` (PNG output for development) |
 
 Not in git, and needed to build: `skylight_backup/`, `port/firmware/` (Wi-Fi firmware and nvram from the backup), `tools/rkdeveloptool/`. Also not in git: `recon/out/`. Never commit anything unpacked from the stock firmware.
@@ -72,6 +75,6 @@ Not in git, and needed to build: `skylight_backup/`, `port/firmware/` (Wi-Fi fir
 
 ## Open items
 
-1. A kernel update path now that adb is gone (loader mode with `rkdeveloptool wl` is untested).
-2. `regulatory.db` and the brcmfmac clm_blob.
-3. Bake the calendar app into the `port/rootfs` image instead of deploying it afterwards.
+1. First real write with `port/update_kernel.py --write` (untested), and a way to start the `recovery` slot without Android (unknown; loader mode with `rkdeveloptool wl` is also untested).
+2. Flash build 5 (kernel with `regulatory.db` in the initramfs; packed in `port/images/*_linux5*.img`, not flashed). The frame runs build 4.
+3. No clm_blob exists for the vendor's 2017 Wi-Fi firmware; Wi-Fi works without it.

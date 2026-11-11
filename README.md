@@ -155,7 +155,7 @@ ssh -i ~/.ssh/skylight_frame -o IdentitiesOnly=yes 'root@fe80::xxxx%en26'
 
 The link-local address may differ from the bring-up one; repeat the `ping6`. On the frame, `systemctl is-system-running` should say `running`.
 
-### 9. Wi-Fi and the calendar (done once; `deploy.sh` syntax-checked for this guide)
+### 9. Wi-Fi and the calendar (done once)
 
 On the frame:
 
@@ -168,13 +168,7 @@ ip addr show wlan0
 
 `wpa_passphrase` asks for the passphrase. In the editor, delete the `#psk="..."` comment line that holds it in clear text.
 
-On the Mac:
-
-```
-bash calendar_app/deploy.sh 'fe80::xxxx%en26'
-```
-
-This installs the app to `/opt/skycal`, creates the `skycal` service and starts it with the example feed (phases of the moon). To show your own calendars, edit `/etc/skycal/config.toml` on the frame and put their iCalendar addresses in `feeds`; for a private Google calendar that is "Secret address in iCal format" in the calendar's settings. Treat that address as a password. Then `systemctl restart skycal`.
+The calendar is part of the Debian image: it is installed in `/opt/skycal` and starts by itself as the `skycal` service, showing the example feed (phases of the moon) once the frame is online. To show your own calendars, edit `/etc/skycal/config.toml` on the frame and put their iCalendar addresses in `feeds`; for a private Google calendar that is "Secret address in iCal format" in the calendar's settings. Treat that address as a password. Then `systemctl restart skycal`.
 
 The three buttons at the top right of the screen go to the previous week, today and the next week. The view returns to the current week after five minutes without a tap.
 
@@ -206,11 +200,34 @@ After this there is no adb. Access is SSH, over Wi-Fi or the USB cable.
 
 | Task | How |
 |---|---|
-| Update the calendar app | `bash calendar_app/deploy.sh '<frame address>'` (never touches the config on the frame) |
+| Update the calendar app | On the Mac: `bash calendar_app/deploy.sh '<frame address>'` (never touches the config on the frame) |
+| Update the kernel | See "Updating the kernel" |
 | Change feeds or time zone | Edit `/etc/skycal/config.toml` on the frame, `systemctl restart skycal` |
 | Logs | `journalctl -u skycal` on the frame |
 | OS updates | Automatic (unattended-upgrades) |
 | Change the bring-up init or kernel config | Rebuild the kernel: the kernel uses its built-in initramfs and ignores the one in the boot image |
+
+## Updating the kernel
+
+Debian updates itself; the kernel does not. Once `boot` holds the mainline kernel there is no adb, so a new kernel is written from the Mac over SSH with `port/update_kernel.py`. It checks the image (size, id, length padding) and the frame (kernel, eMMC size, a boot image already at the slot's offset), and writes only with `--write`, reading the slot back afterwards.
+
+```
+docker run --rm -v skylight-kbuild:/build -v "$PWD":/src skylight-build bash /src/port/build.sh
+python3 port/rkimg.py mkboot --template <backup>/partitions/boot.img \
+    --kernel port/out/zImage-dtb --ramdisk port/out/ramdisk.cpio.gz --out port/images/boot_new.img
+python3 port/update_kernel.py <frame address> boot port/images/boot_new.img
+python3 port/update_kernel.py <frame address> boot port/images/boot_new.img --write
+```
+
+The first `update_kernel.py` call changes nothing on the flash and must end with `CHECKS PASSED`. After the second, run `reboot` on the frame.
+
+| Status | |
+|---|---|
+| Verified 2026-11-11 | Build, packing, and the checks-only run against the reference frame |
+| **Untested** | The write itself (`--write`) |
+| **Unknown** | How to start the `recovery` slot without Android. Until that is known a new kernel cannot be tried out before it goes into `boot`, and the only way back from a kernel that does not start is loader mode with `rkdeveloptool wl`, which is also untested |
+
+The intended arrangement, once a way into `recovery` is found (candidates: holding another ring button at power-on, or a boot message in the `misc` partition): keep a rescue kernel in `recovery` (`bash port/mkrescue.sh`, packed with the stock `recovery.img` as template), which stays in the telnet bring-up shell and can rewrite `boot`.
 
 ## Recovery
 
@@ -222,9 +239,9 @@ After this there is no adb. Access is SSH, over Wi-Fi or the USB cable.
 
 ## Open items
 
-- A kernel update path now that adb is gone.
-- `regulatory.db` and the brcmfmac clm_blob for Wi-Fi.
-- Baking the calendar into the root filesystem image instead of deploying it afterwards.
+- A first real kernel update with `port/update_kernel.py --write`, and a way to start the `recovery` slot without Android (see "Updating the kernel").
+- The reference frame still runs the kernel without the regulatory database (build 4); build 5 includes it and is packed but not flashed.
+- brcmfmac reports no clm_blob. The vendor's 2017 Wi-Fi firmware has no matching one, and Wi-Fi works without it.
 - Audio: the rk312x codec has no mainline driver. Not needed for a calendar.
 
 ## Unpacking the stock firmware (optional)
@@ -236,6 +253,12 @@ python3 -m venv recon/.venv && recon/.venv/bin/pip install fdt
 recon/.venv/bin/python -I recon/extract.py <backup> recon/out
 ```
 
+## License and warranty
+
+MIT license, see `LICENSE`. The board device tree (`port/dts/`) is additionally offered under GPL-2.0-or-later, as its header says, to match the Linux kernel.
+
+There is no warranty of any kind. This project replaces the operating system of a consumer device by writing to its flash storage. Following this guide can leave a frame unable to start, erase what is stored on it, and will void the manufacturer's warranty and end the vendor's service on that frame. Several procedures here are marked untested. Nobody involved in this project is liable for any damage or loss. If you follow it, you do so entirely at your own risk; make and keep the backup in step 1 first.
+
 ## Legal
 
-This repository contains no vendor firmware. Everything unpacked from the stock images, the device backup and the Wi-Fi firmware stays on your own machine and is git-ignored; do not commit it. The project is not affiliated with Skylight.
+This repository contains no vendor firmware. Everything unpacked from the stock images, the device backup and the Wi-Fi firmware stays on your own machine and is git-ignored; do not commit it. The project is not affiliated with, endorsed by or supported by Skylight or Rockchip; product names are used only to identify the hardware.
