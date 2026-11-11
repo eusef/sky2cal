@@ -12,10 +12,11 @@ A hardware port plus a small display app. A Skylight Frame 2 digital photo frame
 
 ## State of the reference device (2026-11-11)
 
-- `boot` holds kernel build 5 (`port/images/boot_linux5.img`, md5 054ac76e3f68da21aad41db2c43f4a04). `recovery` holds the rescue variant of the same build (`recovery_linux5_rescue.img`, md5 daf49f0608db44e24fe82d5bdbf78a92). Android no longer boots and adb is gone.
+- `boot` holds kernel build 6 (`port/images/boot_linux6.img`, md5 10c00e692a8e599d7a7bfefac06968e4). `recovery` holds the rescue variant of the same build (`recovery_linux6_rescue.img`, md5 92e5bb6e802067d0433b8a3a3a9809a3). Android no longer boots and adb is gone.
 - `python3 /usr/local/sbin/skylight-reboot-recovery` on the frame starts the `recovery` slot once (PMU register flag). No button does.
 - Debian lives on the former `user` partition (the only partition the mainline kernel exposes, as mmcblk0p1).
 - Access is SSH only (Wi-Fi, or IPv6 link-local over the USB cable), key-only, root password locked.
+- Over the USB cable the frame is a composite device set up by the initramfs `init` through configfs: NCM network (`usb0`, 192.168.77.1, DHCP server), ACM serial, and a read-only drive `FRAME` that links to the settings page (`skyadmin`, reachable on `usb0` only).
 - Stock U-Boot, `system` and the other Android partitions are untouched.
 
 ## Safety rules
@@ -80,3 +81,4 @@ Not in git, and needed to build: `skylight_backup/`, `port/firmware/` (Wi-Fi fir
 1. Loader-mode writes (`rkdeveloptool wl`) are untested; they are the only way back from a `boot` kernel that does not start.
 2. A `reboot-mode` device tree node (syscon at PMU 0x100a0000, offset 0x38) so `systemctl reboot recovery` works without the helper.
 3. No clm_blob exists for the vendor's 2017 Wi-Fi firmware; Wi-Fi works without it.
+4. The USB gadget is untested on Windows (NCM is expected to work on Windows 11).

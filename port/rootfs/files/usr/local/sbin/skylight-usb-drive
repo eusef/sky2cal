@@ -1,0 +1,73 @@
+#!/bin/sh
+# The small read-only USB drive named FRAME that a computer sees when the frame is plugged in.
+# It holds a page that opens the settings page (http://192.168.77.1) and a short README.
+# Run at boot by skylight-usb-drive.service:
+#   1. build the FAT image if it is missing or was built by a different version of this script
+#   2. attach it to the mass storage function of the USB gadget that the kernel's init set up
+# With a kernel that has no such gadget (build 5 and older) step 2 is skipped without an error.
+set -eu
+DIR=/var/lib/skylight-usb-drive
+IMG=$DIR/frame.img
+STAMP=$DIR/built-by
+LUN=/sys/kernel/config/usb_gadget/skylight/functions/mass_storage.0/lun.0
+URL=http://192.168.77.1/
+
+# The stamp is the checksum of this script, so any change to the contents below rebuilds the
+# image once; an unchanged script leaves it alone.
+want=$(sha256sum "$0" | cut -d' ' -f1)
+have=$(cat "$STAMP" 2>/dev/null || true)
+
+detach() {
+    [ -e "$LUN/file" ] || return 0
+    [ -n "$(cat "$LUN/file")" ] || return 0
+    # A computer that has the drive open holds it; forced_eject takes it away regardless.
+    if [ -e "$LUN/forced_eject" ]; then echo 1 > "$LUN/forced_eject"; else echo > "$LUN/file"; fi
+}
+
+if [ ! -s "$IMG" ] || [ "$want" != "$have" ]; then
+    detach
+    mkdir -p "$DIR"
+    T=$(mktemp -d "$DIR/build.XXXXXX")
+    trap 'rm -rf "$T"' EXIT
+    cat > "$T/page.html" <<EOF
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="refresh" content="0; url=$URL">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Open Frame Settings</title>
+</head>
+<body style="font-family: sans-serif; text-align: center; margin: 3em 1em;">
+<p style="font-size: 2.2em;"><a href="$URL">Open Frame Settings</a></p>
+<p style="font-size: 1.2em;">Your frame's settings page should open by itself in a moment. If it does not, click the link above.</p>
+</body>
+</html>
+EOF
+    # CRLF line ends, so the oldest Windows text viewer shows it properly too.
+    printf '%s\r\n' \
+        "This drive belongs to your photo frame calendar." \
+        "" \
+        "To change Wi-Fi, calendars or the time zone, open the file" \
+        "\"Open Frame Settings\" on this drive, or type this address into a browser:" \
+        "" \
+        "    $URL" \
+        "" \
+        "The page only works while the frame is plugged into this computer." \
+        "The drive is read-only and can be ignored or ejected at any time." > "$T/readme.txt"
+    rm -f "$IMG.new"
+    mkfs.vfat -C -n FRAME "$IMG.new" 2048 > /dev/null
+    export MTOOLS_SKIP_CHECK=1
+    mcopy -i "$IMG.new" "$T/page.html" "::Open Frame Settings.html"
+    mcopy -i "$IMG.new" "$T/readme.txt" "::README.txt"
+    chmod 644 "$IMG.new"
+    mv "$IMG.new" "$IMG"
+    echo "$want" > "$STAMP"
+    echo "built $IMG"
+fi
+
+[ -e "$LUN/file" ] || exit 0
+[ "$(cat "$LUN/file")" = "$IMG" ] && exit 0
+detach
+echo "$IMG" > "$LUN/file"
+echo "attached $IMG"

@@ -13,7 +13,7 @@ RUN sed -i 's/^Components: main$/Components: main non-free-firmware/' /etc/apt/s
       systemd-sysv systemd-timesyncd systemd-resolved udev dbus kmod \
       openssh-server nftables wpasupplicant iw wireless-regdb firmware-brcm80211 \
       unattended-upgrades needrestart apt-utils ca-certificates tzdata \
-      iproute2 iputils-ping e2fsprogs less nano \
+      iproute2 iputils-ping e2fsprogs dosfstools mtools less nano \
       python3 python3-pil python3-icalendar python3-recurring-ical-events python3-evdev \
       fonts-dejavu-core \
  && apt-get clean
@@ -45,7 +45,7 @@ RUN set -e; \
     [ -s /root/.ssh/authorized_keys ]; \
     find /etc/ssh -name 'ssh_host_*' -delete; \
     systemctl enable systemd-networkd systemd-resolved systemd-timesyncd nftables ssh \
-        wpa_supplicant@wlan0 skylight-firstboot unattended-upgrades apt-daily.timer apt-daily-upgrade.timer; \
+        wpa_supplicant@wlan0 skylight-firstboot skylight-usb-drive unattended-upgrades apt-daily.timer apt-daily-upgrade.timer; \
     ln -sf /usr/share/zoneinfo/America/Los_Angeles /etc/localtime; \
     echo America/Los_Angeles > /etc/timezone; \
     systemctl disable wpa_supplicant; \

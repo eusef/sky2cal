@@ -162,3 +162,15 @@ Every chip needed for a display-only build has a mainline Linux driver (FACT, ch
 - GRF 0x200081d8, which mainline's rk3036 device tree uses for the same purpose, is NOT read by this U-Boot: the value survived a restart there and the frame started normally.
 - Helper: `/usr/local/sbin/skylight-reboot-recovery` on the frame (source in `port/rootfs/files`).
 - Kernel build 5 was tried this way from `recovery` (full Debian, Wi-Fi associated, no failed units) before it was written to `boot`. `recovery` now holds the rescue variant of build 5.
+
+## Build 6: configfs USB gadget (tested 2026-11-11 on the reference frame, macOS host)
+
+- FACT: the legacy `g_cdc` gadget is replaced by a configfs gadget created in the initramfs `init` before Debian starts: NCM network, ACM serial, one removable read-only mass storage LUN. USB ID 1d6b:0104, product string "Skylight Frame Settings". The kernel log shows the gadget bound to `10180000.usb` about 2.6 s after kernel start.
+- FACT: macOS lists it as a network port named "Skylight Frame Settings" and gets an address from the frame's DHCP server on `usb0` (address only, no router or DNS). `http://192.168.77.1` answers over the cable and is refused over Wi-Fi.
+- FACT: the network addresses come from a hash of the eMMC CID, so the Mac kept the same interface across three boots. The frame's `usb0` link-local address differs from the one it had under build 5.
+- FACT: `skylight-usb-drive.service` attaches a 2 MiB FAT image; macOS mounts it read-only as `FRAME` with `Open Frame Settings.html` and `README.txt`.
+- FACT: the rescue image (`recovery_linux6_rescue.img`) was started once with `skylight-reboot-recovery`; its telnet shell answered on the IPv6 link-local address of the new interface, and `reboot -f` there returned the frame to `boot`.
+- FACT: one USB serial port appears on the Mac in both the Debian and the rescue boot. Whether a shell answers on it was not tested.
+- INFERRED: Windows 11 binds its in-box NCM driver to the network function. Not tested on any Windows version.
+- Sequence used: build 6 normal image in `recovery`, tested there, then `boot_linux6.img` to `boot` and the rescue image to `recovery`, all with `port/update_kernel.py`.
+

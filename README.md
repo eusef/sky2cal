@@ -114,7 +114,7 @@ adb shell "busybox md5sum /dev/block/mmcblk0p6"
 adb reboot recovery
 ```
 
-The md5 must equal the one `mkboot` printed. After about 70 seconds the frame shows console text and appears on the Mac as a USB network interface named "CDC Composite Gadget". With no Debian installed yet, it stops in a bring-up shell reachable by telnet. Find the interface (`networksetup -listallhardwareports`), then the frame's address:
+The md5 must equal the one `mkboot` printed. After about 70 seconds the frame shows console text and appears on the Mac as a USB network interface named "Skylight Frame Settings" ("CDC Composite Gadget" with kernel builds up to 5, the ones this step was run with). With no Debian installed yet, it stops in a bring-up shell reachable by telnet. Find the interface (`networksetup -listallhardwareports`), then the frame's address:
 
 ```
 ping6 -c 2 -I en26 ff02::1
@@ -201,11 +201,13 @@ After this there is no adb. Access is SSH, over Wi-Fi or the USB cable.
 For owners, no terminal needed:
 
 1. Plug the frame's micro-USB socket into a computer. The computer gets an address from the frame by itself.
-2. Open `http://192.168.77.1` in a browser.
+2. A small read-only drive named FRAME appears on the computer. Open the file "Open Frame Settings" on it, or type `http://192.168.77.1` into a browser.
+
+The drive needs kernel build 6 or later (not yet tried on a frame); with an older kernel there is no drive and the address is typed by hand. The frame builds the drive's contents itself (`/usr/local/sbin/skylight-usb-drive`).
 
 The page shows the Wi-Fi state, the frame's address and when the calendars were last fetched. It can join a Wi-Fi network, add and remove calendar feeds (shown masked, never in full), set the time zone, the first day of the week and the refresh interval, flip the touch axes, restart the calendar and restart the frame.
 
-There is no login: holding the cable is the key. The page listens on the cable's address only and the firewall admits it from `usb0` only, so it is unreachable over Wi-Fi. The computer keeps its own internet connection (the frame hands out no route and no DNS). Meant for macOS, where the page has been tested with the server in dry-run mode but not yet against a frame. Windows may not have a driver for this USB network type yet.
+There is no login: holding the cable is the key. The page listens on the cable's address only and the firewall admits it from `usb0` only, so it is unreachable over Wi-Fi. The computer keeps its own internet connection (the frame hands out no route and no DNS). Tested from macOS against the reference frame with command-line requests (page load, a settings save, Wi-Fi search); joining a network and the other buttons were only tested with the server in dry-run mode. From kernel build 6 the cable carries a USB network of the NCM type, a serial port and the drive in one device; Windows 11, macOS and Linux bring their own drivers for all three, so Windows 11 is expected to work but is untested. Kernel builds up to 5 used the ECM network type, for which Windows has no driver.
 
 ## Day to day
 

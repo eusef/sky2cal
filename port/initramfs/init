@@ -1,7 +1,7 @@
 #!/bin/sh
 # Bring-up init for the Skylight Frame 2 test kernel. Three ways to see it is alive:
 #   1. text on the panel (tty0 on the U-Boot framebuffer)
-#   2. USB: a serial shell (ttyGS0) and Ethernet 192.168.77.1 with telnet
+#   2. USB: a serial shell (ttyGS0) and a network (usb0) at 192.168.77.1 with telnet
 #   3. the boot log saved to the unused "kpanic" eMMC partition, readable later from Android
 export PATH=/bin:/sbin
 mount -t proc proc /proc
@@ -18,6 +18,75 @@ VOP=0x1010e000
 vop() { devmem $((VOP + $1)) 32 "$2"; }
 vop 0x30 0x00000190 && vop 0x34 0x04FF031F && vop 0x38 0x04FF031F && vop 0x3c 0x001E005A && vop 0x90 1 \
     && say "display window set to 800x1280" || say "display window setup FAILED"
+
+# USB gadget, built through configfs: NCM network (usb0), ACM serial (ttyGS0) and a mass storage
+# drive that stays empty until Debian's skylight-usb-drive attaches an image. The kernel keeps
+# the gadget across switch_root, so it is set up here, before Debian starts. This script does
+# not run under "set -e", and nothing in this function may stop the boot: every failure prints
+# a message and returns, and every wait is bounded.
+G=/sys/kernel/config/usb_gadget/skylight
+mac() { echo "02:$(echo "$1" | cut -c1-2):$(echo "$1" | cut -c3-4):$(echo "$1" | cut -c5-6):$(echo "$1" | cut -c7-8):$(echo "$1" | cut -c9-10)"; }
+usb_gadget() {
+    mkdir -p /sys/kernel/config 2>/dev/null
+    mount -t configfs none /sys/kernel/config 2>/dev/null
+    [ -d /sys/kernel/config/usb_gadget ] || { say "usb gadget: no configfs gadget support"; return 1; }
+    mkdir "$G" 2>/dev/null || { say "usb gadget: cannot create the gadget"; return 1; }
+    # An interface-association composite device, the form Windows expects for several functions.
+    echo 0x1d6b > "$G/idVendor" && echo 0x0104 > "$G/idProduct" && echo 0x0200 > "$G/bcdUSB" \
+        && echo 0x0600 > "$G/bcdDevice" && echo 0xEF > "$G/bDeviceClass" \
+        && echo 0x02 > "$G/bDeviceSubClass" && echo 0x01 > "$G/bDeviceProtocol" \
+        || { say "usb gadget: cannot write the device descriptor"; return 1; }
+    mkdir "$G/strings/0x409" "$G/configs/c.1" "$G/configs/c.1/strings/0x409" 2>/dev/null \
+        || { say "usb gadget: cannot create the configuration"; return 1; }
+    echo "sky2cal" > "$G/strings/0x409/manufacturer"
+    echo "Skylight Frame Settings" > "$G/strings/0x409/product"
+    echo "Network, serial and settings drive" > "$G/configs/c.1/strings/0x409/configuration"
+    echo 0xc0 > "$G/configs/c.1/bmAttributes"    # self-powered, as the earlier g_cdc gadget was
+
+    mkdir "$G/functions/ncm.usb0" "$G/functions/acm.GS0" "$G/functions/mass_storage.0" 2>/dev/null \
+        || { say "usb gadget: cannot create the functions"; return 1; }
+
+    # The same adapter addresses and serial number on every boot, so the computer recognises
+    # the frame: taken from a hash of the eMMC's CID, never the CID itself. The eMMC may not
+    # have been found yet, so wait for it, up to 5 s. Without it the kernel picks random
+    # addresses and there is no serial number.
+    i=0
+    until [ -s /sys/block/mmcblk0/device/cid ]; do
+        i=$((i + 1)); [ $i -gt 10 ] && break
+        sleep 0.5
+    done
+    h=$(echo "sky2cal-usb:$(cat /sys/block/mmcblk0/device/cid 2>/dev/null)" | sha256sum 2>/dev/null | cut -c1-32)
+    if [ -s /sys/block/mmcblk0/device/cid ] && [ "${#h}" = 32 ]; then
+        echo "$(mac "$h")" > "$G/functions/ncm.usb0/dev_addr" \
+            && echo "$(mac "$(echo "$h" | cut -c11-20)")" > "$G/functions/ncm.usb0/host_addr" \
+            || say "usb gadget: could not set the network addresses, they stay random"
+        echo "$h" | cut -c21-32 > "$G/strings/0x409/serialnumber"
+    else
+        say "usb gadget: no eMMC CID, network addresses are random"
+    fi
+
+    # Kernel messages on the serial function too, where this kernel offers the switch.
+    [ -e "$G/functions/acm.GS0/console" ] && echo 1 > "$G/functions/acm.GS0/console" 2>/dev/null
+
+    # One removable, read-only drive with nothing in it yet.
+    L=$G/functions/mass_storage.0/lun.0
+    echo 1 > "$L/removable" && echo 1 > "$L/ro" && echo 0 > "$L/cdrom" \
+        || say "usb gadget: could not set the drive options"
+
+    for f in ncm.usb0 acm.GS0 mass_storage.0; do
+        ln -s "$G/functions/$f" "$G/configs/c.1/$f" || { say "usb gadget: cannot add $f"; return 1; }
+    done
+
+    # The USB controller appears once its driver and PHY are ready: wait up to 10 s.
+    i=0
+    until udc=$(ls /sys/class/udc 2>/dev/null | head -1) && [ -n "$udc" ]; do
+        i=$((i + 1)); [ $i -gt 20 ] && { say "usb gadget: no USB device controller after 10 s"; return 1; }
+        sleep 0.5
+    done
+    echo "$udc" > "$G/UDC" || { say "usb gadget: could not start on $udc"; return 1; }
+    say "usb gadget: network, serial and drive started on $udc"
+}
+usb_gadget || say "usb gadget: setup FAILED, carrying on without it"
 
 # Normal boot: hand over to Debian on the eMMC "user" partition (mmcblk0p1 via blkdevparts).
 # Anything unexpected (no partition, wrong place or size, not ext4, no init) falls through to

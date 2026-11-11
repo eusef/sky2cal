@@ -64,7 +64,7 @@ if [ ! -s "$RD/regulatory.db" ] || [ ! -s "$RD/regulatory.db.p7s" ]; then
     install -m 644 "${db%-upstream}.p7s-upstream" "$RD/regulatory.db.p7s"
 fi
 # The binary is armhf and cannot run here; check the applet names inside it instead.
-for a in telnetd cttyhack setsid ifconfig devmem switch_root; do
+for a in telnetd cttyhack setsid ifconfig devmem switch_root sha256sum ln; do
     grep -a -q "$a" "$R/bin/busybox" || die "busybox has no '$a' applet, which init needs"
 done
 cat > /build/initramfs.list <<EOF
@@ -93,7 +93,7 @@ file /lib/firmware/brcm/brcmfmac43455-sdio.txt $FW/nvram_ap6255.txt 644 0 0
 file /lib/firmware/regulatory.db $RD/regulatory.db 644 0 0
 file /lib/firmware/regulatory.db.p7s $RD/regulatory.db.p7s 644 0 0
 EOF
-for a in sh mount umount mkdir echo cat ls dd sleep dmesg uname cut tr head grep ifconfig telnetd setsid cttyhack sync reboot poweroff ps free df vi hexdump devmem switch_root; do
+for a in sh mount umount mkdir ln sha256sum echo cat ls dd sleep dmesg uname cut tr head grep ifconfig telnetd setsid cttyhack sync reboot poweroff ps free df vi hexdump devmem switch_root; do
     echo "slink /bin/$a busybox 777 0 0" >> /build/initramfs.list
 done
 
@@ -116,7 +116,8 @@ done
 $M -s olddefconfig
 
 echo "== config check"
-for c in ARCH_ROCKCHIP CLK_RK312X USB_DWC2 USB_CDC_COMPOSITE U_SERIAL_CONSOLE FB_SIMPLE FRAMEBUFFER_CONSOLE MMC_DW_ROCKCHIP \
+for c in ARCH_ROCKCHIP CLK_RK312X USB_DWC2 USB_GADGET USB_LIBCOMPOSITE CONFIGFS_FS USB_CONFIGFS USB_CONFIGFS_NCM \
+         USB_CONFIGFS_ACM USB_CONFIGFS_MASS_STORAGE U_SERIAL_CONSOLE FB_SIMPLE FRAMEBUFFER_CONSOLE MMC_DW_ROCKCHIP \
          PHY_ROCKCHIP_INNO_USB2 ARM_APPENDED_DTB PINCTRL_ROCKCHIP SERIAL_8250_DW BLK_DEV_INITRD KERNEL_XZ \
          I2C_RK3X MFD_RK8XX_I2C REGULATOR_RK808 RTC_DRV_HYM8563 PWM_ROCKCHIP BACKLIGHT_PWM TOUCHSCREEN_GOODIX \
          INPUT_EVDEV KEYBOARD_GPIO PWRSEQ_SIMPLE BRCMFMAC BRCMFMAC_SDIO DEVMEM \
@@ -124,7 +125,8 @@ for c in ARCH_ROCKCHIP CLK_RK312X USB_DWC2 USB_CDC_COMPOSITE U_SERIAL_CONSOLE FB
          PACKET IPV6 AUTOFS_FS FHANDLE TMPFS_POSIX_ACL CFG80211 NAMESPACES; do
     grep -q -E "^CONFIG_$c=y" "$O/.config" || die "required option CONFIG_$c is not =y"
 done
-# Exactly one legacy gadget may be built in, or another grabs the USB controller before g_cdc.
+# No legacy gadget may be built in: it would grab the USB controller before init sets up the
+# configfs gadget (NCM network, ACM serial, mass storage; the functions are checked above).
 # The gadget drivers are the tristate options in the legacy Kconfig (bool ones are sub-options).
 gadgets=$(awk '/^config /{c=$2} /^[ \t]+tristate/{if(c!=""){print c; c=""}}' drivers/usb/gadget/legacy/Kconfig)
 [ -n "$gadgets" ] || die "could not read the legacy gadget list"
@@ -132,7 +134,7 @@ builtin=""
 for g in $gadgets; do
     if grep -q -E "^CONFIG_$g=y" "$O/.config"; then builtin="$builtin $g"; fi
 done
-[ "$builtin" = " USB_CDC_COMPOSITE" ] || die "built-in legacy gadgets must be exactly USB_CDC_COMPOSITE, found:$builtin"
+[ -z "$builtin" ] || die "no legacy gadget may be built in, found:$builtin"
 echo "config ok"
 
 if ! $M -s zImage rockchip/rk3128-skylight-frame2.dtb > "$O/build.log" 2>&1; then

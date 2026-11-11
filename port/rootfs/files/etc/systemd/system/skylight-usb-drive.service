@@ -1,0 +1,11 @@
+[Unit]
+Description=USB drive FRAME with a link to the settings page
+After=local-fs.target sys-kernel-config.mount
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh /usr/local/sbin/skylight-usb-drive
+
+[Install]
+WantedBy=multi-user.target

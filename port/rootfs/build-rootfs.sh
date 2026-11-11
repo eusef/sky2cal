@@ -66,7 +66,8 @@ docker export "$cid" | docker run --rm -i -v "$PWD/port/images":/img skylight-bu
     for f in usr/lib/systemd/systemd sbin/init usr/sbin/sshd usr/sbin/wpa_supplicant usr/bin/python3 root/.ssh/authorized_keys \
              usr/lib/firmware/brcm/brcmfmac43455-sdio.bin usr/lib/firmware/brcm/brcmfmac43455-sdio.txt \
              opt/skycal/skycal/frame.py etc/systemd/system/skycal.service etc/skycal/config.toml \
-             opt/skycal/skyadmin/server.py etc/systemd/system/skyadmin.service; do
+             opt/skycal/skyadmin/server.py etc/systemd/system/skyadmin.service \
+             usr/local/sbin/skylight-usb-drive usr/sbin/mkfs.vfat usr/bin/mcopy; do
         [ -e "$f" ] || { echo "FAIL: $f missing from the root filesystem" >&2; exit 1; }
     done
     [ "$(stat -c %a root/.ssh)" = 700 ] && [ "$(stat -c %a root/.ssh/authorized_keys)" = 600 ] \
@@ -74,6 +75,7 @@ docker export "$cid" | docker run --rm -i -v "$PWD/port/images":/img skylight-bu
     [ "$(stat -c %a:%u etc/skycal/config.toml)" = 600:0 ] || { echo "FAIL: calendar config must be root-only" >&2; exit 1; }
     [ -L etc/systemd/system/multi-user.target.wants/skycal.service ] || { echo "FAIL: skycal.service is not enabled" >&2; exit 1; }
     [ -L etc/systemd/system/multi-user.target.wants/skyadmin.service ] || { echo "FAIL: skyadmin.service is not enabled" >&2; exit 1; }
+    [ -L etc/systemd/system/multi-user.target.wants/skylight-usb-drive.service ] || { echo "FAIL: skylight-usb-drive.service is not enabled" >&2; exit 1; }
     grep -q "^skycal:" etc/passwd || { echo "FAIL: no skycal user" >&2; exit 1; }
     grep -q "^root:[!*]" etc/shadow || { echo "FAIL: root password is not locked" >&2; exit 1; }
     echo "root filesystem MiB: $(du -sm . | cut -f1)"
