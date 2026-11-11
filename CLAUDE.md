@@ -12,15 +12,16 @@ A hardware port plus a small display app. A Skylight Frame 2 digital photo frame
 
 ## State of the reference device (2026-11-11)
 
-- `boot` (mmcblk0p5) and `recovery` (mmcblk0p6) both hold the mainline kernel. Android no longer boots and adb is gone.
+- `boot` holds kernel build 5 (`port/images/boot_linux5.img`, md5 054ac76e3f68da21aad41db2c43f4a04). `recovery` holds the rescue variant of the same build (`recovery_linux5_rescue.img`, md5 daf49f0608db44e24fe82d5bdbf78a92). Android no longer boots and adb is gone.
+- `python3 /usr/local/sbin/skylight-reboot-recovery` on the frame starts the `recovery` slot once (PMU register flag). No button does.
 - Debian lives on the former `user` partition (the only partition the mainline kernel exposes, as mmcblk0p1).
 - Access is SSH only (Wi-Fi, or IPv6 link-local over the USB cable), key-only, root password locked.
 - Stock U-Boot, `system` and the other Android partitions are untouched.
 
 ## Safety rules
 
-- Every write to a device partition needs the owner's explicit go-ahead, and the owner runs the write command. Do not route around a hook that blocks it.
-- `recovery` is the test slot. Try a new kernel there before putting it in `boot`.
+- Every write to `boot` needs the owner's explicit go-ahead each time. Writes to `recovery` (the test slot) are covered by the owner's standing request, using `port/update_kernel.py`. Never route around a hook that blocks a command; ask instead.
+- Try a new kernel in `recovery` first (README, "Updating the kernel"), then put it in `boot`, then put the rescue image back in `recovery`.
 - The backup under `skylight_backup/` is the only restore path. Never modify, move or delete it or `skylight_backup.zip`. Neither is in git.
 - Never run `rkdeveloptool ppt` on this device: it wedges the loader until the power is pulled.
 - Tools such as `rkdeveloptool` get built inside the project directory (`tools/`), not installed globally.
@@ -39,7 +40,7 @@ All run from the repository root on the Mac. `README.md` has the full sequence a
 | Pack a flashable image | `python3 port/rkimg.py mkboot --template <stock recovery.img or boot.img> --kernel port/out/zImage-dtb --ramdisk port/out/ramdisk.cpio.gz --out port/images/<name>.img` |
 | Rescue kernel (stays in the bring-up shell) | `bash port/mkrescue.sh` |
 | Check an image against a slot on a running frame (no write) | `python3 port/update_kernel.py <frame address> <recovery\|boot> <image>` |
-| Write that slot (owner runs this) | the same with `--write` |
+| Write that slot | the same with `--write` |
 | Debian root filesystem image | `bash port/rootfs/build-rootfs.sh ~/.ssh/skylight_frame.pub` |
 | Write the root filesystem (erases `user`) | `SKYLIGHT_HOST='fe80::xxxx%enN' python3 port/install_rootfs.py` |
 | Deploy or update the calendar | `bash calendar_app/deploy.sh '<frame address>'` |
@@ -75,6 +76,6 @@ Not in git, and needed to build: `skylight_backup/`, `port/firmware/` (Wi-Fi fir
 
 ## Open items
 
-1. First real write with `port/update_kernel.py --write` (untested), and a way to start the `recovery` slot without Android (unknown; loader mode with `rkdeveloptool wl` is also untested).
-2. Flash build 5 (kernel with `regulatory.db` in the initramfs; packed in `port/images/*_linux5*.img`, not flashed). The frame runs build 4.
+1. Loader-mode writes (`rkdeveloptool wl`) are untested; they are the only way back from a `boot` kernel that does not start.
+2. A `reboot-mode` device tree node (syscon at PMU 0x100a0000, offset 0x38) so `systemctl reboot recovery` works without the helper.
 3. No clm_blob exists for the vendor's 2017 Wi-Fi firmware; Wi-Fi works without it.

@@ -209,38 +209,55 @@ After this there is no adb. Access is SSH, over Wi-Fi or the USB cable.
 
 ## Updating the kernel
 
-Debian updates itself; the kernel does not. Once `boot` holds the mainline kernel there is no adb, so a new kernel is written from the Mac over SSH with `port/update_kernel.py`. It checks the image (size, id, length padding) and the frame (kernel, eMMC size, a boot image already at the slot's offset), and writes only with `--write`, reading the slot back afterwards.
+Debian updates itself; the kernel does not. Once `boot` holds the mainline kernel there is no adb, so a new kernel is written from the Mac over SSH and tried out in the `recovery` slot before it goes into `boot`. This whole sequence was run on the reference frame on 2026-11-11 (kernel build 4 to build 5).
+
+`port/update_kernel.py` checks the image (size, id, length padding) and the frame (kernel, eMMC size, a boot image already at the slot's offset). Without `--write` it changes nothing on the flash and must end with `CHECKS PASSED`; with `--write` it writes the slot and reads it back.
+
+1. Build, and pack the same kernel three ways:
 
 ```
 docker run --rm -v skylight-kbuild:/build -v "$PWD":/src skylight-build bash /src/port/build.sh
+bash port/mkrescue.sh
+python3 port/rkimg.py mkboot --template <backup>/partitions/recovery.img \
+    --kernel port/out/zImage-dtb --ramdisk port/out/ramdisk.cpio.gz --out port/images/recovery_new.img
 python3 port/rkimg.py mkboot --template <backup>/partitions/boot.img \
     --kernel port/out/zImage-dtb --ramdisk port/out/ramdisk.cpio.gz --out port/images/boot_new.img
-python3 port/update_kernel.py <frame address> boot port/images/boot_new.img
-python3 port/update_kernel.py <frame address> boot port/images/boot_new.img --write
+python3 port/rkimg.py mkboot --template <backup>/partitions/recovery.img \
+    --kernel port/out/zImage-dtb-rescue --ramdisk port/out/ramdisk.cpio.gz --out port/images/recovery_rescue.img
 ```
 
-The first `update_kernel.py` call changes nothing on the flash and must end with `CHECKS PASSED`. After the second, run `reboot` on the frame.
+2. Try it from `recovery`. `boot` is untouched, so if the new kernel does not start, pulling the power brings the old one back:
 
-| Status | |
-|---|---|
-| Verified 2026-11-11 | Build, packing, and the checks-only run against the reference frame |
-| **Untested** | The write itself (`--write`) |
-| **Unknown** | How to start the `recovery` slot without Android. Until that is known a new kernel cannot be tried out before it goes into `boot`, and the only way back from a kernel that does not start is loader mode with `rkdeveloptool wl`, which is also untested |
+```
+python3 port/update_kernel.py <frame address> recovery port/images/recovery_new.img --write
+ssh -i ~/.ssh/skylight_frame root@<frame address> python3 /usr/local/sbin/skylight-reboot-recovery
+```
 
-The intended arrangement, once a way into `recovery` is found (candidates: holding another ring button at power-on, or a boot message in the `misc` partition): keep a rescue kernel in `recovery` (`bash port/mkrescue.sh`, packed with the stock `recovery.img` as template), which stays in the telnet bring-up shell and can rewrite `boot`.
+The helper is part of the Debian image; on a frame installed from an older image, copy `port/rootfs/files/usr/local/sbin/skylight-reboot-recovery` to the same path first. The frame restarts into the new kernel and Debian. Check it over SSH: `uname -v` shows the new build time, `systemctl is-system-running` says `running`.
+
+3. Put it in `boot`, then leave a rescue kernel in `recovery`:
+
+```
+python3 port/update_kernel.py <frame address> boot port/images/boot_new.img --write
+python3 port/update_kernel.py <frame address> recovery port/images/recovery_rescue.img --write
+ssh -i ~/.ssh/skylight_frame root@<frame address> reboot
+```
+
+`skylight-reboot-recovery` sets a flag in a chip register that the stock U-Boot reads once (details in `RECON.md`). It works for one restart only; the restart after that, or a power cycle, starts `boot` again. No ring button starts `recovery`: all five were tried.
 
 ## Recovery
 
 | Situation | Way out |
 |---|---|
 | New image in `recovery` does not boot | Frame falls into loader mode; `rkdeveloptool rd` returns to the normal boot |
-| Debian is broken, kernel is fine | `bash port/mkrescue.sh`, pack `port/out/zImage-dtb-rescue` as in step 5 and flash it: the frame stays in the bring-up shell, with Debian's partition as mmcblk0p2 |
+| Debian is damaged but still starts far enough for SSH | `python3 /usr/local/sbin/skylight-reboot-recovery` on the frame starts the rescue kernel kept in `recovery`: the frame stays in the telnet bring-up shell on the USB cable, with Debian's partition as mmcblk0p2 |
+| Debian or the kernel in `boot` does not start at all | Loader mode (below). The rescue kernel cannot be reached, because starting `recovery` needs a running system to set the flag |
 | Back to stock | Loader mode by the ring's right button, then write the stock images from the backup with `rkdeveloptool wl`. **Untested.** rockusb block addresses are 0x2000 sectors below raw eMMC sectors; see `RECON.md` before trying |
 
 ## Open items
 
-- A first real kernel update with `port/update_kernel.py --write`, and a way to start the `recovery` slot without Android (see "Updating the kernel").
-- The reference frame still runs the kernel without the regulatory database (build 4); build 5 includes it and is packed but not flashed.
+- Writing through loader mode (`rkdeveloptool wl`) is untested, and it is the only way back from a `boot` kernel that does not start.
+- A `reboot-mode` node in the device tree, so that `systemctl reboot recovery` replaces the helper script.
 - brcmfmac reports no clm_blob. The vendor's 2017 Wi-Fi firmware has no matching one, and Wi-Fi works without it.
 - Audio: the rk312x codec has no mainline driver. Not needed for a calendar.
 

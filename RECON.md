@@ -145,11 +145,20 @@ Every chip needed for a display-only build has a mainline Linux driver (FACT, ch
 ## Slot offsets under the mainline kernel (FACT, 2026-11-11)
 
 - The mainline kernel exposes only the `user` partition, so the slots are reached as regions of `/dev/mmcblk0`: `boot` is raw sector 90112 (0x16000), 24576 sectors (12 MiB); `recovery` is raw sector 114688 (0x1C000), 65536 sectors (32 MiB). Read back over SSH, both regions had the md5 of the images flashed to those slots (b34fd6bdf94c7f700d99ec4e76cd15e8 and 693642960edc21ab95acbcb47009fe64).
-- `port/update_kernel.py` uses these offsets. Its checks-only mode passed against the frame; its write mode is untested.
-- Not known: how to start the `recovery` slot without Android's `adb reboot recovery`.
+- `port/update_kernel.py` uses these offsets. FACT: its write mode wrote `recovery` three times and `boot` once on 2026-11-11, each verified by read-back and by an independent md5 of the region.
 
 ## Wi-Fi regulatory data (2026-11-11)
 
 - FACT (kernel log, build 4): `cfg80211: failed to load regulatory.db` at 2.2 s. cfg80211 is built in and asks before the root filesystem is mounted, so Debian's copy in `/lib/firmware` is never seen and the regulatory domain stays at world (`country 00`).
-- Build 5 puts the upstream-signed `regulatory.db` and `regulatory.db.p7s` (Debian `wireless-regdb`) into the initramfs. FACT: both files are in the built ramdisk. INFERRED until flashed: the kernel accepts them and `iw reg get` shows the configured country.
+- Build 5 puts the upstream-signed `regulatory.db` and `regulatory.db.p7s` (Debian `wireless-regdb`) into the initramfs. FACT (build 5 running from `boot`): the load failure is gone from the kernel log and `iw reg get` reports `country US: DFS-FCC`, the country set in the wpa_supplicant config.
 - FACT: brcmfmac also reports `no clm_blob available`. The fitted firmware is the vendor's 7.45.69 from 2017. INFERRED: there is no clm_blob matching it; Wi-Fi associates and works without one.
+
+## Starting the recovery slot without Android (FACT, tested 2026-11-11)
+
+- No ring button starts `recovery`. Each of the five was held while power was plugged in, with no USB host attached; all started the normal boot. (With a USB host attached the right button enters loader mode, as recorded above.)
+- The stock U-Boot reads a boot-mode word from the PMU at 0x100a0038 (base 0x100a0000, offset 0x38). Found by disassembling `uboot.img` from the backup: the routine at file offset 0x78f8 loads that register, and the caller at 0xae88 compares it, with the low byte masked, against 0x5242C300.
+- Writing 0x5242C303 (Rockchip `BOOT_RECOVERY`) there from Linux and restarting starts the `recovery` slot. U-Boot rewrites the register to 0xC3524203, and the next restart starts `boot` again, so the flag works once. The register is not flash; a power cycle also clears it.
+- The write must be one aligned 32-bit store. A byte-wise copy into the mapped register page raised a bus error.
+- GRF 0x200081d8, which mainline's rk3036 device tree uses for the same purpose, is NOT read by this U-Boot: the value survived a restart there and the frame started normally.
+- Helper: `/usr/local/sbin/skylight-reboot-recovery` on the frame (source in `port/rootfs/files`).
+- Kernel build 5 was tried this way from `recovery` (full Debian, Wi-Fi associated, no failed units) before it was written to `boot`. `recovery` now holds the rescue variant of build 5.

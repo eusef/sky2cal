@@ -1,0 +1,32 @@
+#!/usr/bin/python3
+"""Restart the frame into the kernel in the `recovery` slot (once).
+
+The stock U-Boot reads a boot-mode flag from the PMU register at 0x100a0038 (found in the
+U-Boot binary and tested 2026-11-11; RECON.md, "Starting the recovery slot"). The flag lives
+in the chip, not on flash: U-Boot consumes it, so the restart after that is a normal one, and
+pulling the power also clears it.
+
+Usage: skylight-reboot-recovery [--no-restart]
+"""
+import ctypes
+import mmap
+import os
+import subprocess
+import sys
+
+PMU_BASE, BOOT_MODE_REG, BOOT_RECOVERY = 0x100A0000, 0x38, 0x5242C303
+
+if sys.argv[1:] not in ([], ["--no-restart"]):
+    sys.exit(__doc__)
+if not os.uname().release.endswith("-skylight"):
+    sys.exit("FAIL: not the Skylight kernel; refusing to touch a register")
+fd = os.open("/dev/mem", os.O_RDWR | os.O_SYNC)
+mem = mmap.mmap(fd, 4096, mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE, offset=PMU_BASE)
+# One aligned 32-bit store; a byte-wise copy into a register page raises a bus error.
+reg = ctypes.c_uint32.from_buffer(mem, BOOT_MODE_REG)
+reg.value = BOOT_RECOVERY
+if reg.value != BOOT_RECOVERY:
+    sys.exit(f"FAIL: the flag reads back as {reg.value:#x}")
+print("recovery flag set")
+if "--no-restart" not in sys.argv[1:]:
+    subprocess.run(["systemctl", "reboot"], check=True)
