@@ -1,0 +1,13 @@
+[Unit]
+Description=Skylight first boot: grow the filesystem, create SSH host keys
+ConditionPathExists=!/var/lib/skylight-firstboot.done
+Before=ssh.service
+After=systemd-remount-fs.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh /usr/local/sbin/skylight-firstboot
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

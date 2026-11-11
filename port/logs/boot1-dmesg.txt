@@ -1,0 +1,234 @@
+[    0.000000] Booting Linux on physical CPU 0xf00
+[    0.000000] Linux version 6.18.63-skylight (root@927e919a2a3f) (arm-linux-gnueabihf-gcc (Debian 14.2.0-19) 14.2.0, GNU ld (GNU Binutils for Debian) 2.44) #2 SMP Tue Nov 10 23:49:53 UTC 2026
+[    0.000000] CPU: ARMv7 Processor [410fc075] revision 5 (ARMv7), cr=10c5387d
+[    0.000000] CPU: div instructions available: patching division code
+[    0.000000] CPU: PIPT / VIPT nonaliasing data cache, VIPT aliasing instruction cache
+[    0.000000] OF: fdt: Machine model: Skylight Frame 2
+[    0.000000] printk: debug: ignoring loglevel setting.
+[    0.000000] Memory policy: Data cache writealloc
+[    0.000000] efi: UEFI not found.
+[    0.000000] cma: Reserved 64 MiB at 0x79800000
+[    0.000000] Zone ranges:
+[    0.000000]   Normal   [mem 0x0000000060000000-0x000000007fffffff]
+[    0.000000]   HighMem  empty
+[    0.000000] Movable zone start for each node
+[    0.000000] Early memory node ranges
+[    0.000000]   node   0: [mem 0x0000000060000000-0x000000007dbfffff]
+[    0.000000]   node   0: [mem 0x000000007dc00000-0x000000007fbfffff]
+[    0.000000]   node   0: [mem 0x000000007fc00000-0x000000007fffffff]
+[    0.000000] Initmem setup node 0 [mem 0x0000000060000000-0x000000007fffffff]
+[    0.000000] OF: reserved mem: 0x7dc00000..0x7fbfffff (32768 KiB) nomap non-reusable framebuffer@7dc00000
+[    0.000000] percpu: Embedded 17 pages/cpu s39116 r8192 d22324 u69632
+[    0.000000] pcpu-alloc: s39116 r8192 d22324 u69632 alloc=17*4096
+[    0.000000] pcpu-alloc: [0] 0 [0] 1 [0] 2 [0] 3 
+[    0.000000] Kernel command line: console=ttyS2,115200n8 console=ttyGS0,115200 console=tty0 clk_ignore_unused pd_ignore_unused ignore_loglevel rdinit=/init
+[    0.000000] printk: log buffer data + meta data: 131072 + 409600 = 540672 bytes
+[    0.000000] Dentry cache hash table entries: 65536 (order: 6, 262144 bytes, linear)
+[    0.000000] Inode-cache hash table entries: 32768 (order: 5, 131072 bytes, linear)
+[    0.000000] Built 1 zonelists, mobility grouping on.  Total pages: 131072
+[    0.000000] mem auto-init: stack:all(zero), heap alloc:off, heap free:off
+[    0.000000] SLUB: HWalign=64, Order=0-3, MinObjects=0, CPUs=4, Nodes=1
+[    0.000000] rcu: Hierarchical RCU implementation.
+[    0.000000] rcu:     RCU event tracing is enabled.
+[    0.000000] rcu:     RCU restricting CPUs from NR_CPUS=16 to nr_cpu_ids=4.
+[    0.000000]  Tracing variant of Tasks RCU enabled.
+[    0.000000] rcu: RCU calculated value of scheduler-enlistment delay is 10 jiffies.
+[    0.000000] rcu: Adjusting geometry for rcu_fanout_leaf=16, nr_cpu_ids=4
+[    0.000000] RCU Tasks Trace: Setting shift to 2 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=4.
+[    0.000000] NR_IRQS: 16, nr_irqs: 16, preallocated irqs: 16
+[    0.000000] rcu: srcu_init: Setting srcu_struct sizes based on contention.
+[    0.000000] clocksource: jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 19112604462750000 ns
+[    0.000000] arch_timer: cp15 timer running at 24.00MHz (phys).
+[    0.000000] clocksource: arch_sys_counter: mask: 0xffffffffffffff max_cycles: 0x588fe9dc0, max_idle_ns: 440795202592 ns
+[    0.000002] sched_clock: 56 bits at 24MHz, resolution 41ns, wraps every 4398046511097ns
+[    0.000025] Switching to timer-based delay loop, resolution 41ns
+[    0.001661] clocksource: rk_timer: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 79635851949 ns
+[    0.001695] sched_clock: 32 bits at 24MHz, resolution 41ns, wraps every 89478484971ns
+[    0.001759] Too many timer definitions for 'rk_timer'
+[    0.001766] Failed to initialize '/timer@20044040': -22
+[    0.001840] Too many timer definitions for 'rk_timer'
+[    0.001847] Failed to initialize '/timer@20044060': -22
+[    0.001911] Too many timer definitions for 'rk_timer'
+[    0.001918] Failed to initialize '/timer@20044080': -22
+[    0.001981] Too many timer definitions for 'rk_timer'
+[    0.001989] Failed to initialize '/timer@200440a0': -22
+[    0.003643] Console: colour dummy device 80x30
+[    0.003680] printk: legacy console [tty0] enabled
+[    0.004818] Calibrating delay loop (skipped), value calculated using timer frequency.. 48.00 BogoMIPS (lpj=240000)
+[    0.004888] CPU: Testing write buffer coherency: ok
+[    0.004999] pid_max: default: 32768 minimum: 301
+[    0.005262] Mount-cache hash table entries: 1024 (order: 0, 4096 bytes, linear)
+[    0.005331] Mountpoint-cache hash table entries: 1024 (order: 0, 4096 bytes, linear)
+[    0.006884] /cpus/cpu@f00 missing clock-frequency property
+[    0.007001] /cpus/cpu@f01 missing clock-frequency property
+[    0.007064] /cpus/cpu@f02 missing clock-frequency property
+[    0.007125] /cpus/cpu@f03 missing clock-frequency property
+[    0.007280] CPU0: thread -1, cpu 0, socket 15, mpidr 80000f00
+[    0.009859] Setting up static identity map for 0x60100000 - 0x60100060
+[    0.010384] rcu: Hierarchical SRCU implementation.
+[    0.010437] rcu:     Max phase no-delay instances is 1000.
+[    0.011153] Timer migration: 1 hierarchy levels; 8 children per group; 1 crossnode level
+[    0.011577] EFI services will not be available.
+[    0.012220] smp: Bringing up secondary CPUs ...
+[    0.014847] CPU1: thread -1, cpu 1, socket 15, mpidr 80000f01
+[    0.017732] CPU2: thread -1, cpu 2, socket 15, mpidr 80000f02
+[    0.020566] CPU3: thread -1, cpu 3, socket 15, mpidr 80000f03
+[    0.020882] smp: Brought up 1 node, 4 CPUs
+[    0.021009] SMP: Total of 4 processors activated (192.00 BogoMIPS).
+[    0.021048] CPU: All CPU(s) started in SVC mode.
+[    0.021550] Memory: 398628K/524288K available (11264K kernel code, 1222K rwdata, 3364K rodata, 3072K init, 259K bss, 57716K reserved, 65536K cma-reserved, 0K highmem)
+[    0.022578] devtmpfs: initialized
+[    0.032674] VFP support v0.3: implementor 41 architecture 2 part 30 variant 7 rev 5
+[    0.033488] posixtimers hash table entries: 2048 (order: 2, 16384 bytes, linear)
+[    0.033738] futex hash table entries: 1024 (65536 bytes on 1 NUMA nodes, total 64 KiB, linear).
+[    0.036032] pinctrl core: initialized pinctrl subsystem
+[    0.037974] DMI not present or invalid.
+[    0.039409] NET: Registered PF_NETLINK/PF_ROUTE protocol family
+[    0.042786] DMA: preallocated 256 KiB pool for atomic coherent allocations
+[    0.047173] thermal_sys: Registered thermal governor 'step_wise'
+[    0.047402] cpuidle: using governor menu
+[    0.047781] No ATAGs?
+[    0.048042] hw-breakpoint: found 5 (+1 reserved) breakpoint and 4 watchpoint registers.
+[    0.048107] hw-breakpoint: maximum watchpoint size is 8 bytes.
+[    0.048659] Serial: AMBA PL011 UART driver
+[    0.072922] gpio gpiochip0: Static allocation of GPIO base is deprecated, use dynamic allocation.
+[    0.074093] rockchip-gpio 2007c000.gpio: probed /pinctrl/gpio@2007c000
+[    0.075017] gpio gpiochip1: Static allocation of GPIO base is deprecated, use dynamic allocation.
+[    0.075656] rockchip-gpio 20080000.gpio: probed /pinctrl/gpio@20080000
+[    0.076497] gpio gpiochip2: Static allocation of GPIO base is deprecated, use dynamic allocation.
+[    0.077028] rockchip-gpio 20084000.gpio: probed /pinctrl/gpio@20084000
+[    0.077812] gpio gpiochip3: Static allocation of GPIO base is deprecated, use dynamic allocation.
+[    0.078347] rockchip-gpio 20088000.gpio: probed /pinctrl/gpio@20088000
+[    0.088526] iommu: Default domain type: Translated
+[    0.088598] iommu: DMA domain TLB invalidation policy: strict mode
+[    0.100011] usbcore: registered new interface driver usbfs
+[    0.100165] usbcore: registered new interface driver hub
+[    0.100284] usbcore: registered new device driver usb
+[    0.101273] pps_core: LinuxPPS API ver. 1 registered
+[    0.101322] pps_core: Software ver. 5.3.6 - Copyright 2005-2007 Rodolfo Giometti <giometti@linux.it>
+[    0.101399] PTP clock support registered
+[    0.101507] EDAC MC: Ver: 3.0.0
+[    0.102372] scmi_core: SCMI protocol bus registered
+[    0.105707] vgaarb: loaded
+[    0.106897] clocksource: Switched to clocksource arch_sys_counter
+[    0.126640] NET: Registered PF_INET protocol family
+[    0.127193] IP idents hash table entries: 8192 (order: 4, 65536 bytes, linear)
+[    0.129587] tcp_listen_portaddr_hash hash table entries: 512 (order: 0, 4096 bytes, linear)
+[    0.129697] Table-perturb hash table entries: 65536 (order: 6, 262144 bytes, linear)
+[    0.129767] TCP established hash table entries: 4096 (order: 2, 16384 bytes, linear)
+[    0.129882] TCP bind hash table entries: 4096 (order: 4, 65536 bytes, linear)
+[    0.130104] TCP: Hash tables configured (established 4096 bind 4096)
+[    0.130311] UDP hash table entries: 256 (order: 2, 14336 bytes, linear)
+[    0.130414] UDP-Lite hash table entries: 256 (order: 2, 14336 bytes, linear)
+[    0.130781] NET: Registered PF_UNIX/PF_LOCAL protocol family
+[    0.130914] PCI: CLS 0 bytes, default 64
+[    0.133150] Initialise system trusted keyrings
+[    0.134219] workingset: timestamp_bits=30 max_order=17 bucket_order=0
+[    0.135372] squashfs: version 4.0 (2009/01/31) Phillip Lougher
+[    0.137082] Key type asymmetric registered
+[    0.137221] Asymmetric key parser 'x509' registered
+[    0.137453] io scheduler mq-deadline registered
+[    0.137546] io scheduler kyber registered
+[    0.137667] io scheduler bfq registered
+[    0.151441] ledtrig-cpu: registered to indicate activity on CPUs
+[    0.153754] simple-framebuffer 7dc00000.framebuffer: framebuffer at 0x7dc00000, 0x1f4000 bytes
+[    0.153842] simple-framebuffer 7dc00000.framebuffer: format=r5g6b5, mode=800x1280x16, linelength=1600
+[    0.154782] Console: switching to colour frame buffer device 100x80
+[    0.162887] simple-framebuffer 7dc00000.framebuffer: fb0: simplefb registered!
+[    0.170701] dma-pl330 20078000.dma-controller: Loaded driver for PL330 DMAC-241330
+[    0.170894] dma-pl330 20078000.dma-controller:       DBUFF-64x8bytes Num_Chans-8 Num_Peri-16 Num_Events-16
+[    0.287328] Serial: 8250/16550 driver, 5 ports, IRQ sharing enabled
+[    0.293650] printk: legacy console [ttyS2] disabled
+[    0.314921] 20068000.serial: ttyS2 at MMIO 0x20068000 (irq = 39, base_baud = 1500000) is a 16550A
+[    0.315359] printk: legacy console [ttyS2] enabled
+[    1.318489] STMicroelectronics ASC driver initialized
+[    1.326353] platform 10106000.video-codec: Adding to iommu group 0
+[    1.353576] brd: module loaded
+[    1.369152] loop: module loaded
+[    1.382174] CAN device driver interface
+[    1.386680] pegasus: Pegasus/Pegasus II USB Ethernet driver
+[    1.393211] usbcore: registered new interface driver pegasus
+[    1.399793] usbcore: registered new interface driver asix
+[    1.406015] usbcore: registered new interface driver ax88179_178a
+[    1.413081] usbcore: registered new interface driver cdc_ether
+[    1.419841] usbcore: registered new interface driver smsc75xx
+[    1.426458] usbcore: registered new interface driver smsc95xx
+[    1.433109] usbcore: registered new interface driver net1080
+[    1.439665] usbcore: registered new interface driver cdc_subset
+[    1.446471] usbcore: registered new interface driver zaurus
+[    1.452948] usbcore: registered new interface driver cdc_ncm
+[    1.461746] dwc2 10180000.usb: supply vusb_d not found, using dummy regulator
+[    1.470225] dwc2 10180000.usb: supply vusb_a not found, using dummy regulator
+[    1.481311] dwc2 10180000.usb: EPs: 10, dedicated fifos, 972 entries in SPRAM
+[    1.499042] printk: legacy console [ttyGS0] enabled
+[    1.506923] g_cdc gadget.0: HOST MAC xx:xx:xx:xx:xx:xx
+[    1.512833] g_cdc gadget.0: MAC xx:xx:xx:xx:xx:xx
+[    1.518328] g_cdc gadget.0: CDC Composite Gadget, version: King Kamehameha Day 2008
+[    1.527108] g_cdc gadget.0: g_cdc ready
+[    1.535244] dwc2 10180000.usb: bound driver g_cdc
+[    1.546124] i2c_dev: i2c /dev entries driver
+[    1.558965] sdhci: Secure Digital Host Controller Interface driver
+[    1.566056] sdhci: Copyright(c) Pierre Ossman
+[    1.571818] Synopsys Designware Multimedia Card Interface Driver
+[    1.579768] sdhci-pltfm: SDHCI platform and OF driver helper
+[    1.581066] dwmmc_rockchip 1021c000.mmc: Using external DMA controller.
+[    1.589228] usbcore: registered new interface driver usbhid
+[    1.593950] dwmmc_rockchip 1021c000.mmc: Version ID is 270a
+[    1.600166] usbhid: USB HID core driver
+[    1.600351] dwmmc_rockchip 1021c000.mmc: DW MMC controller at irq 42,32 bit host data width,256 deep fifo
+[    1.621987] mmc_host mmc0: card is non-removable.
+[    1.628211] hw perfevents: enabled with armv7_cortex_a7 PMU driver, 5 (8000000f) counters available
+[    1.639974] NET: Registered PF_INET6 protocol family
+[    1.640421] mmc_host mmc0: Bus speed (slot 0) = 400000Hz (slot req 400000Hz, actual 400000HZ div = 0)
+[    1.648353] Segment Routing with IPv6
+[    1.667730] In-situ OAM (IOAM) with IPv6
+[    1.674743] sit: IPv6, IPv4 and MPLS over IPv4 tunneling driver
+[    1.684787] NET: Registered PF_PACKET protocol family
+[    1.693047] can: controller area network core
+[    1.697475] dwc2 10180000.usb: new device is high-speed
+[    1.700522] NET: Registered PF_CAN protocol family
+[    1.709768] dwc2 10180000.usb: new address 1
+[    1.711138] can: raw protocol
+[    1.718409] mmc_host mmc0: Bus speed (slot 0) = 50000000Hz (slot req 52000000Hz, actual 50000000HZ div = 0)
+[    1.721369] can: broadcast manager protocol
+[    1.727886] mmc0: new high speed MMC card at address 0001
+[    1.728509] can: netlink gateway - max_hops=1
+[    1.732657] mmcblk0: mmc0:0001 T22708 7.13 GiB
+[    1.733810] Key type dns_resolver registered
+[    1.740413] mmcblk0boot0: mmc0:0001 T22708 4.00 MiB
+[    1.743344] ThumbEE CPU extension supported.
+[    1.750952] mmcblk0boot1: mmc0:0001 T22708 4.00 MiB
+[    1.751640] Registering SWP/SWPB emulation handler
+[    1.759088] mmcblk0rpmb: mmc0:0001 T22708 4.00 MiB, chardev (242:0)
+[    1.775961] Loading compiled-in X.509 certificates
+[    1.848812] clk: Not disabling unused clocks
+[    1.856113] PM: genpd: Not disabling unused power domains
+[    1.868703] Freeing unused kernel image (initmem) memory: 3072K
+[    1.878113] Run /init as init process
+[    1.884612]   with arguments:
+[    1.890294]     /init
+[    1.895129]   with environment:
+[    1.900941]     HOME=/
+[    1.905837]     TERM=linux
+[    1.934556] skylight-init: === Skylight Frame 2: mainline Linux 6.18.63-skylight is running ===
+[    1.959102] skylight-init: alive: uptime 1.94s, pass 1
+[    6.994133] skylight-init: alive: uptime 6.97s, pass 2
+[    7.181853] skylight-init: log pass 2 saved to mmcblk0
+[   11.997223] rockchip-pm-domain 100a0000.syscon:power-controller: sync_state() pending due to 10106000.video-codec
+[   12.217682] skylight-init: alive: uptime 12.19s, pass 3
+[   17.252886] skylight-init: alive: uptime 17.22s, pass 4
+[   22.291772] skylight-init: alive: uptime 22.26s, pass 5
+[   27.332047] skylight-init: alive: uptime 27.30s, pass 6
+[   27.532964] skylight-init: log pass 6 saved to mmcblk0
+[   32.569912] skylight-init: alive: uptime 32.54s, pass 7
+[   37.616954] skylight-init: alive: uptime 37.59s, pass 8
+[   42.653228] skylight-init: alive: uptime 42.62s, pass 9
+[   47.699869] skylight-init: alive: uptime 47.67s, pass 10
+[   52.746969] skylight-init: alive: uptime 52.72s, pass 11
+[   57.783387] skylight-init: alive: uptime 57.75s, pass 12
+[   57.982951] skylight-init: log pass 12 saved to mmcblk0
+[   63.018082] skylight-init: alive: uptime 62.99s, pass 13
+[   68.054046] skylight-init: alive: uptime 68.02s, pass 14
+[   73.092044] skylight-init: alive: uptime 73.06s, pass 15
+[   78.137773] skylight-init: alive: uptime 78.11s, pass 16
+[   83.172912] skylight-init: alive: uptime 83.14s, pass 17

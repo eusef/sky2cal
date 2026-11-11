@@ -1,0 +1,31 @@
+# Device backups hold the full eMMC contents (including Wi-Fi credentials and account data).
+*backup*
+!backup.sh
+
+# Pieces unpacked from the stock firmware (the vendor's; regenerate with recon/extract.py).
+recon/out/
+
+# Locally built tools, build outputs, vendor firmware and the rootfs build context (holds the SSH key).
+tools/
+port/out/
+port/images/
+port/firmware/
+port/rootfs/context/
+
+# Calendar app: the real config holds the secret calendar address.
+calendar_app/config.toml
+calendar_app/cache/
+
+.venv/
+__pycache__/
+*.pyc
+log/
+.DS_Store
+
+# Never commit credentials.
+.env*
+*.pem
+*.p8
+*.p12
+*.key
+*.mobileprovision

@@ -1,0 +1,11 @@
+# Maintenance link over the USB cable (the frame is 192.168.77.1, also reachable by IPv6 link-local).
+[Match]
+Name=usb0
+
+[Link]
+RequiredForOnline=no
+
+[Network]
+Address=192.168.77.1/24
+LinkLocalAddressing=ipv6
+ConfigureWithoutCarrier=yes

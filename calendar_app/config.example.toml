@@ -1,0 +1,11 @@
+# Example config: copy to config.toml (which is git-ignored). Feeds are read-only iCalendar URLs (https only).
+# For a private Google calendar use its "Secret address in iCal format"; that URL is a secret.
+timezone = "America/Los_Angeles"   # ASSUMED; change to the home's zone
+first_weekday = 6                  # Monday=0 .. Sunday=6
+cache_dir = "cache"
+feeds = [
+  "https://calendar.google.com/calendar/ical/%23moonphase%40group.v.calendar.google.com/public/basic.ics",
+]
+# refresh_minutes = 10             # how often the feeds are fetched again
+# touch_flip_x = true              # touch panel orientation against the framebuffer; both default
+# touch_flip_y = true              # to true, which is what the Skylight Frame 2 needs

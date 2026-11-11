@@ -1,0 +1,93 @@
+#!/bin/sh
+# Bring-up init for the Skylight Frame 2 test kernel. Three ways to see it is alive:
+#   1. text on the panel (tty0 on the U-Boot framebuffer)
+#   2. USB: a serial shell (ttyGS0) and Ethernet 192.168.77.1 with telnet
+#   3. the boot log saved to the unused "kpanic" eMMC partition, readable later from Android
+export PATH=/bin:/sbin
+mount -t proc proc /proc
+mount -t sysfs sys /sys
+mount -t devtmpfs dev /dev
+mkdir -p /dev/pts /tmp && mount -t devpts devpts /dev/pts
+
+say() { echo "$*" > /dev/tty0 2>/dev/null; echo "skylight-init: $*" > /dev/kmsg; }
+say "=== Skylight Frame 2: mainline Linux $(uname -r) is running ==="
+
+# U-Boot leaves a logo-sized (240x750) window on the display controller. Widen it to the full
+# 800x1280 panel so it matches the simple-framebuffer node (register values: RECON.md).
+VOP=0x1010e000
+vop() { devmem $((VOP + $1)) 32 "$2"; }
+vop 0x30 0x00000190 && vop 0x34 0x04FF031F && vop 0x38 0x04FF031F && vop 0x3c 0x001E005A && vop 0x90 1 \
+    && say "display window set to 800x1280" || say "display window setup FAILED"
+
+# Normal boot: hand over to Debian on the eMMC "user" partition (mmcblk0p1 via blkdevparts).
+# Anything unexpected (no partition, wrong place or size, not ext4, no init) falls through to
+# the bring-up shell below, so a frame without Debian installed still gives a USB shell.
+ROOT=mmcblk0p1
+boot_debian() {
+    # A rescue image (port/mkrescue.sh) puts a dummy partition first, so the place-and-size
+    # check below fails and the frame stays in the bring-up shell.
+    i=0
+    until [ -b /dev/$ROOT ]; do
+        i=$((i + 1)); [ $i -gt 20 ] && { say "no $ROOT: bring-up shell"; return; }
+        sleep 0.5
+    done
+    [ "$(cat /sys/class/block/$ROOT/start)" = 4866048 ] && [ "$(cat /sys/class/block/$ROOT/size)" = 10076160 ] \
+        || { say "$ROOT is not where the user partition should be: bring-up shell"; return; }
+    mkdir -p /newroot
+    mount -t ext4 -o ro /dev/$ROOT /newroot 2>/dev/null || { say "$ROOT has no ext4 filesystem: bring-up shell"; return; }
+    if [ -f /newroot/usr/lib/systemd/systemd ] && [ -L /newroot/sbin/init ]; then
+        say "starting Debian from $ROOT"
+        umount /dev/pts 2>/dev/null
+        for m in dev proc sys; do mount -o move /$m /newroot/$m; done
+        exec switch_root /newroot /sbin/init
+    fi
+    umount /newroot
+    say "$ROOT has no systemd init: bring-up shell"
+}
+boot_debian
+
+# USB serial shell, restarted whenever the host disconnects.
+( while true; do
+    [ -c /dev/ttyGS0 ] && setsid cttyhack sh -c 'echo "Skylight Frame 2 shell"; exec sh' < /dev/ttyGS0 > /dev/ttyGS0 2>&1
+    sleep 2
+  done ) &
+
+# USB Ethernet with a telnet shell (bring-up only; no network beyond the cable).
+( until ifconfig usb0 192.168.77.1 netmask 255.255.255.0 up 2>/dev/null; do sleep 2; done
+  telnetd -l /bin/sh 2>/dev/null ) &
+
+# kpanic: 4 MiB at raw sector 0x292000 (verified against the full-disk backup). It is all zeros
+# in the backup and only ever written by a stock-kernel panic. Guard on the exact eMMC size.
+EMMC_SECTORS=14942208
+KPANIC_SECTOR=2695168
+save_log() {
+    {
+        echo "SKYLOG boot=$(cat /proc/sys/kernel/random/boot_id) pass=$1 uptime=$(cut -d' ' -f1 /proc/uptime)"
+        echo "--- cmdline: $(cat /proc/cmdline)"
+        echo "--- udc: $(ls /sys/class/udc 2>&1) state=$(cat /sys/class/udc/*/state 2>&1)"
+        echo "--- fb: $(cat /sys/class/graphics/fb0/name /sys/class/graphics/fb0/virtual_size /sys/class/graphics/fb0/bits_per_pixel 2>&1 | tr '\n' ' ')"
+        echo "--- block: $(cd /sys/block && for b in *; do echo "$b=$(cat $b/size)"; done | tr '\n' ' ')"
+        echo "--- net: $(ifconfig -a 2>&1 | grep -E 'Link|inet ' | tr '\n' ' ')"
+        echo "--- meminfo: $(head -3 /proc/meminfo | tr '\n' ' ')"
+        echo "--- dmesg:"
+        dmesg
+        echo "SKYLOG-END"
+    } > /tmp/log 2>&1
+    for b in /sys/block/mmcblk*; do
+        case "$b" in *boot*|*rpmb*) continue;; esac
+        [ "$(cat "$b/size" 2>/dev/null)" = "$EMMC_SECTORS" ] || continue
+        dd if=/tmp/log of="/dev/${b##*/}" bs=512 seek=$KPANIC_SECTOR count=8000 conv=fsync 2>/dev/null \
+            && say "log pass $1 saved to ${b##*/}"
+        return
+    done
+    say "log pass $1: no eMMC of the expected size, nothing saved"
+}
+
+n=0
+while true; do
+    n=$((n + 1))
+    say "alive: uptime $(cut -d' ' -f1 /proc/uptime)s, pass $n"
+    # Save at about 10 s, 30 s, 60 s and 3 min, then stop writing to flash.
+    case $n in 2|6|12|36) save_log $n;; esac
+    sleep 5
+done

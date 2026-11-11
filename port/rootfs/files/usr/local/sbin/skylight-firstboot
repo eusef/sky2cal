@@ -1,0 +1,9 @@
+#!/bin/sh
+# Runs once: host keys must be unique per device, and the image is smaller than the partition.
+# Keys come first so a resize problem never locks SSH out; the marker is written only when
+# both steps worked and everything is on flash.
+ssh-keygen -A || exit 1
+resize2fs /dev/mmcblk0p1 || exit 1
+sync
+touch /var/lib/skylight-firstboot.done
+sync
