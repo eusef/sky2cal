@@ -2,6 +2,8 @@
 
 A Skylight Frame 2 photo frame turned into a family wall calendar. The stock Android 5.1 (2016 security patches, apps running as root) is replaced by mainline Linux 6.18 and Debian 13, which keeps itself patched and shows a touch-paged week view of one or more iCalendar feeds.
 
+Once it is set up, the frame needs no terminal: plugged into a computer with its micro-USB cable it shows up as a small drive named FRAME, and the link on that drive opens a settings page for Wi-Fi and calendars (see "Settings page over USB").
+
 | Document | Content |
 |---|---|
 | `README.md` | Setup, from a stock frame to a running calendar |
@@ -200,14 +202,51 @@ After this there is no adb. Access is SSH, over Wi-Fi or the USB cable.
 
 For owners, no terminal needed:
 
-1. Plug the frame's micro-USB socket into a computer. The computer gets an address from the frame by itself.
+1. Plug the frame's micro-USB socket into a computer. The computer gets an address from the frame by itself; allow up to a minute.
 2. A small read-only drive named FRAME appears on the computer. Open the file "Open Frame Settings" on it, or type `http://192.168.77.1` into a browser.
 
-The drive needs kernel build 6 or later (not yet tried on a frame); with an older kernel there is no drive and the address is typed by hand. The frame builds the drive's contents itself (`/usr/local/sbin/skylight-usb-drive`).
+| Section of the page | What it does |
+|---|---|
+| Status | Wi-Fi network and state, the frame's address on Wi-Fi, when the calendars were last fetched, kernel version |
+| Wi-Fi | Search for networks and join one. Networks the frame already knows are kept |
+| Calendar | Add and remove calendar feeds (https only; shown masked, never in full), time zone, first day of the week, refresh interval |
+| Display | Flip the touch axes, for when taps land in the wrong place |
+| Maintenance | Restart the calendar, restart the frame (each asks for confirmation) |
 
-The page shows the Wi-Fi state, the frame's address and when the calendars were last fetched. It can join a Wi-Fi network, add and remove calendar feeds (shown masked, never in full), set the time zone, the first day of the week and the refresh interval, flip the touch axes, restart the calendar and restart the frame.
+A save takes effect at once: the page rewrites `/etc/skycal/config.toml` or the Wi-Fi file and restarts the service concerned. Comments in `config.toml` are not kept when the page rewrites it.
 
-There is no login: holding the cable is the key. The page listens on the cable's address only and the firewall admits it from `usb0` only, so it is unreachable over Wi-Fi. The computer keeps its own internet connection (the frame hands out no route and no DNS). Tested from macOS against the reference frame with command-line requests (page load, a settings save, Wi-Fi search); joining a network and the other buttons were only tested with the server in dry-run mode. From kernel build 6 the cable carries a USB network of the NCM type, a serial port and the drive in one device; Windows 11, macOS and Linux bring their own drivers for all three, so Windows 11 is expected to work but is untested. Kernel builds up to 5 used the ECM network type, for which Windows has no driver.
+### How it is protected
+
+- There is no login: holding the cable is the key. The page (`skyadmin`) listens on the cable's address only, and the firewall admits it from `usb0` only, so it is unreachable over Wi-Fi.
+- The computer keeps its own internet connection. The frame hands out an address, but no route and no DNS.
+- Calendar addresses are secrets, so the page never shows one in full. A Wi-Fi passphrase is stored only as its derived key.
+- Every change needs a token that only the page itself carries, and requests that name another host are refused, so another website open in the same browser cannot change settings.
+- The FRAME drive is read-only. The frame builds its contents itself (`/usr/local/sbin/skylight-usb-drive`).
+
+### What the cable carries
+
+From kernel build 6 the frame is one USB device with three functions: a network (NCM type), a serial port and the FRAME drive. The bring-up `init` creates it before Debian starts, so the rescue kernel has the same network. The frame's address on it is always 192.168.77.1.
+
+Kernel builds up to 5 offered a network of the ECM type and a serial port: no drive, so the address is typed by hand, and no Windows driver.
+
+### Installing it on a frame set up before this existed
+
+1. `bash calendar_app/deploy.sh '<frame address>'` installs the settings page, the firewall and `usb0` files and the drive service. It needs the frame to be online once, to fetch the `dosfstools` and `mtools` packages. With kernel build 5 the page then works at `http://192.168.77.1`.
+2. For the drive and the Windows-friendly network, update to kernel build 6 (see "Updating the kernel").
+
+A frame installed from a current Debian image and kernel has all of it from the start.
+
+### What has been tested
+
+| Item | Status |
+|---|---|
+| macOS: network, address by DHCP, page load, a settings save, Wi-Fi search, FRAME drive mounts read-only | Tested on the reference frame, 2026-11-11, page requests made from the command line |
+| Page unreachable over Wi-Fi | Tested |
+| Rescue kernel reachable over the new USB network | Tested (telnet, IPv6 link-local) |
+| Joining a Wi-Fi network, adding or removing a calendar, display flips, the two restart buttons | Tested only with the server in dry-run mode on the Mac |
+| Clicking through the page in a browser | Not tested |
+| Windows | Not tested. Windows 11 brings drivers for all three functions, so it is expected to work |
+| Linux hosts | Not tested |
 
 ## Day to day
 
@@ -215,14 +254,15 @@ There is no login: holding the cable is the key. The page listens on the cable's
 |---|---|
 | Update the calendar app | On the Mac: `bash calendar_app/deploy.sh '<frame address>'` (never touches the config on the frame) |
 | Update the kernel | See "Updating the kernel" |
-| Change Wi-Fi, feeds or time zone | The settings page over USB, or edit `/etc/skycal/config.toml` on the frame, `systemctl restart skycal` |
-| Logs | `journalctl -u skycal` on the frame |
+| Change Wi-Fi, calendars, time zone or week start | Plug in the USB cable and open the settings page (see "Settings page over USB"). By hand: edit `/etc/skycal/config.toml` on the frame, `systemctl restart skycal` |
+| Update the settings page | The same `deploy.sh` run as the calendar app |
+| Logs | `journalctl -u skycal` on the frame; `journalctl -u skyadmin` for the settings page (it logs no calendar addresses or passphrases) |
 | OS updates | Automatic (unattended-upgrades) |
 | Change the bring-up init or kernel config | Rebuild the kernel: the kernel uses its built-in initramfs and ignores the one in the boot image |
 
 ## Updating the kernel
 
-Debian updates itself; the kernel does not. Once `boot` holds the mainline kernel there is no adb, so a new kernel is written from the Mac over SSH and tried out in the `recovery` slot before it goes into `boot`. This whole sequence was run on the reference frame on 2026-11-11 (kernel build 4 to build 5).
+Debian updates itself; the kernel does not. Once `boot` holds the mainline kernel there is no adb, so a new kernel is written from the Mac over SSH and tried out in the `recovery` slot before it goes into `boot`. This whole sequence was run on the reference frame twice on 2026-11-11 (kernel build 4 to build 5, then build 5 to build 6).
 
 `port/update_kernel.py` checks the image (size, id, length padding) and the frame (kernel, eMMC size, a boot image already at the slot's offset). Without `--write` it changes nothing on the flash and must end with `CHECKS PASSED`; with `--write` it writes the slot and reads it back.
 
@@ -273,6 +313,8 @@ ssh -i ~/.ssh/skylight_frame root@<frame address> reboot
 - A `reboot-mode` node in the device tree, so that `systemctl reboot recovery` replaces the helper script.
 - brcmfmac reports no clm_blob. The vendor's 2017 Wi-Fi firmware has no matching one, and Wi-Fi works without it.
 - Audio: the rk312x codec has no mainline driver. Not needed for a calendar.
+- The settings page and the USB device have not been tried on Windows or in a real browser session; see "What has been tested" under "Settings page over USB".
+- A settings screen on the frame itself (a QR code that opens the page from a phone over Wi-Fi) is planned, not built.
 
 ## Unpacking the stock firmware (optional)
 
