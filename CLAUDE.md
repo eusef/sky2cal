@@ -61,7 +61,7 @@ There are no tests, linter config or CI. The build scripts check their own resul
 | `port/rootfs/` | Debian 13 armhf image: Dockerfile, overlay files, build script |
 | `port/install_rootfs.py`, `port/tn.py` | Write the image over the bring-up telnet shell; address from `SKYLIGHT_HOST` |
 | `port/update_kernel.py` | Check and write a boot image to `boot` or `recovery` over SSH on a frame running Debian |
-| `calendar_app/skycal/` | Calendar: `feed.py` (iCalendar fetch and cache), `weather.py` (Open-Meteo forecast, only when `weather_place` is set), `render.py` (week, event details, day list, weather, screensaver), `frame.py` (framebuffer, touch loop, screensaver and backlight), `__main__.py` (PNG output for development) |
+| `calendar_app/skycal/` | Calendar: `feed.py` (iCalendar fetch and cache; the display runs it in a child process so that reading a large calendar does not slow drawing), `weather.py` (Open-Meteo forecast, only when `weather_place` is set), `render.py` (week, event details, day list, weather, screensaver), `frame.py` (framebuffer, touch loop, screensaver and backlight), `__main__.py` (PNG output for development) |
 | `calendar_app/skyadmin/` | Settings web page on the USB cable network only (`http://192.168.77.1`): `server.py` (pages, request checks, system commands), `settings.py` (config TOML and Wi-Fi network list, atomic writes); unit `calendar_app/skyadmin.service` |
 
 Not in git, and needed to build: `skylight_backup/`, `port/firmware/` (Wi-Fi firmware and nvram from the backup), `tools/rkdeveloptool/`. Also not in git: `recon/out/`. Never commit anything unpacked from the stock firmware.

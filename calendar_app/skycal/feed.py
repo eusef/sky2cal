@@ -8,7 +8,10 @@ from __future__ import annotations
 
 import hashlib
 import html
+import pickle
 import re
+import subprocess
+import sys
 import urllib.request
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
@@ -119,6 +122,50 @@ def events_between(ics: bytes, first: date, last: date, tz: ZoneInfo, cal: int =
         if ev.start < hi and (ev.end > lo or ev.start >= lo):
             out.append(ev)
     return out
+
+
+def read_feeds(urls: list, cache_dir: Path, first: date, last: date, tz: ZoneInfo) -> list[tuple]:
+    """Fetch every feed and read its events for the days first..last. One entry per feed:
+    (ics, saved_at, events, first, last), with None for whatever could not be had."""
+    data = []
+    for i, url in enumerate(urls):
+        ics, saved_at, events = None, None, None
+        try:
+            ics, saved_at = fetch(url, cache_dir)
+            if ics is not None:
+                events = events_between(ics, first, last, tz, cal=i)
+        except Exception as err:
+            print(f"feed {i} not usable: {type(err).__name__}", file=sys.stderr)
+        data.append((ics, saved_at, events, first, last))
+    return data
+
+
+def read_feeds_apart(urls: list, cache_dir: Path, first: date, last: date, tz: ZoneInfo, timeout: float = 600.0) -> list[tuple]:
+    """read_feeds() in a process of its own. Reading a large calendar is seconds of plain
+    Python, and in a thread that more than doubles the time of every picture drawn meanwhile
+    (measured on the frame, 2026-11-19). Raises when the other process fails or takes too long.
+
+    The addresses are secret, so they travel on its standard input, never on its command line.
+    SIGUSR1 is ignored there first of all: `systemctl kill -s USR1 skycal` (start the screensaver)
+    reaches every process of the service, and would otherwise end this one."""
+    if not urls:
+        return []
+    job = pickle.dumps((list(urls), str(Path(cache_dir).resolve()), first, last, tz.key))
+    code = "import signal; signal.signal(signal.SIGUSR1, signal.SIG_IGN); from skycal import feed; feed.serve()"
+    done = subprocess.run([sys.executable, "-c", code], input=job, stdout=subprocess.PIPE, timeout=timeout, check=True,
+                          cwd=Path(__file__).resolve().parent.parent)
+    data = pickle.loads(done.stdout)
+    if not isinstance(data, list) or len(data) != len(urls) or not all(isinstance(e, tuple) and len(e) == 5 for e in data):
+        raise ValueError("unexpected answer")
+    return data
+
+
+def serve() -> None:
+    """The other end of read_feeds_apart(): the job from standard input, its result to standard output."""
+    out, sys.stdout = sys.stdout.buffer, sys.stderr          # nothing else may write into the result
+    urls, cache_dir, first, last, zone = pickle.loads(sys.stdin.buffer.read())
+    out.write(pickle.dumps(read_feeds(urls, Path(cache_dir), first, last, ZoneInfo(zone))))
+    out.flush()
 
 
 def on_day(events: list[Event], day: date, tz: ZoneInfo) -> list[Event]:

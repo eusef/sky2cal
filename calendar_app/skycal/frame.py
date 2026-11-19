@@ -21,6 +21,7 @@ import sys
 import threading
 import time
 import tomllib
+import warnings
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -28,7 +29,7 @@ from zoneinfo import ZoneInfo
 from PIL import Image, ImageChops
 
 from . import weather as wx
-from .feed import Event, events_between, fetch
+from .feed import Event, events_between, read_feeds, read_feeds_apart
 from .render import (NAV, H, W, fmt_time, render_day, render_detail, render_saver, render_weather, render_week,
                      week_start)
 
@@ -44,10 +45,23 @@ WINDOW_BACK_W, WINDOW_AHEAD_W = 26, 78   # weeks around today that are read ahea
 TICK_S = 15                  # longest sleep of the display loop
 SAVER_DEFAULT_MIN = 10       # minutes without a touch before the screensaver; 0 in the config turns it off
 SAVER_DIM = 0.2              # backlight during the screensaver, as a share of its normal level
+AHEAD_PAUSE_S = 0.1          # how long the screen is left alone before weeks are drawn ahead
+
+
+_fast565 = True              # until Pillow turns out not to have the "BGR;16" mode (gone in Pillow 12)
+warnings.filterwarnings("ignore", message="BGR;16", category=DeprecationWarning)
 
 
 def rgb565(img: Image.Image) -> bytes:
     """Little-endian RGB565 bytes of an RGB image."""
+    global _fast565
+    if _fast565:
+        # Pillow's own conversion: the same bytes as the channel arithmetic below, in a sixth
+        # of the time on the frame (39 ms against 224 ms, measured 2026-11-19).
+        try:
+            return img.convert("BGR;16").tobytes()
+        except Exception:
+            _fast565 = False
     r, g, b = img.split()
     hi = ImageChops.add(r.point(lambda v: v & 0xF8), g.point(lambda v: v >> 5))
     lo = ImageChops.add(g.point(lambda v: (v & 0x1C) << 3), b.point(lambda v: v >> 3))
@@ -192,22 +206,19 @@ def fetch_loop(feeds: list, cache: Path, refresh_s: int, tz: ZoneInfo, results: 
     """Background thread: fetch every feed, hand the results to the display loop, repeat.
     Runs apart from the display loop so a slow or dead network never delays a tap.
 
-    Reading a large calendar takes seconds on the frame, so it is also done here, once per
-    fetch, for a wide window of weeks; paging inside that window then only has to draw.
-    Each entry is (ics, saved_at, events or None, window first day, window last day)."""
+    Reading a large calendar takes seconds on the frame, so it is also done from here, once
+    per fetch, for a wide window of weeks; paging inside that window then only has to draw.
+    The reading itself runs in a process of its own (see read_feeds_apart), and in this one
+    only if that fails. Each entry is (ics, saved_at, events or None, window first day,
+    window last day)."""
     while True:
-        data = []
         today = datetime.now(tz).date()
         first, last = today - timedelta(weeks=WINDOW_BACK_W), today + timedelta(weeks=WINDOW_AHEAD_W)
-        for i, url in enumerate(feeds):
-            ics, saved_at, events = None, None, None
-            try:
-                ics, saved_at = fetch(url, cache)
-                if ics is not None:
-                    events = events_between(ics, first, last, tz, cal=i)
-            except Exception as err:
-                print(f"feed {i} not usable: {type(err).__name__}", file=sys.stderr)
-            data.append((ics, saved_at, events, first, last))
+        try:
+            data = read_feeds_apart(feeds, cache, first, last, tz)
+        except Exception as err:
+            print(f"feeds read in the display's own process: {type(err).__name__}", file=sys.stderr)
+            data = read_feeds(feeds, cache, first, last, tz)
         results.put(("feeds", (data, time.time())))
         os.write(wake_fd, b"x")
         fresh = all(entry[0] is not None and entry[1] is None for entry in data)
@@ -249,9 +260,60 @@ def gather(data: list, tz: ZoneInfo, first: date, last: date) -> tuple[list, dat
     return events, oldest, missing
 
 
+def read_ahead(data: list, first: date, last: date) -> bool:
+    """True when gather() can answer for first..last without reading a calendar again (which takes seconds)."""
+    return all(ics is None or (prepared is not None and lo <= first and last <= hi)
+               for ics, _, prepared, lo, hi in data)
+
+
+class Touched(Exception):
+    """Raised inside a week that is being drawn ahead when a finger arrives: the touch goes first."""
+
+
+def finger_down(pos: dict) -> bool:
+    """True between a finger's landing and its lifting, going by what touches() keeps in `pos`."""
+    return bool(pos.get("landing")) or "down" in pos
+
+
+def next_turn(events: list, now: datetime) -> datetime | None:
+    """The next moment after `now` at which an event starts or ends in the middle of a minute
+    (a picture is drawn anew every minute anyway); None if there is none."""
+    return min((t for ev in events for t in (ev.start, ev.end) if (t.second or t.microsecond) and t > now), default=None)
+
+
+class Weeks:
+    """Week pictures already drawn, so that a card opens and closes, and a neighbouring week
+    or the current one appears, without drawing the week again.
+
+    `draw(which, now, pause)` gives (picture, tappable areas, events) for the week `which`
+    weeks from this one. A picture is good for one `key` (the minute and the data it was drawn
+    from) and until an event in it starts or ends. At most four are kept: the week on show,
+    the one before, the one after and the current week. They are never drawn on, only copied."""
+
+    def __init__(self, draw):
+        self.draw, self.key, self.kept = draw, None, {}
+
+    def fresh(self, which: int, key, now: datetime) -> bool:
+        entry = self.kept.get(which) if key == self.key else None
+        return entry is not None and (entry[3] is None or now < entry[3])
+
+    def get(self, which: int, key, now: datetime, shown: int, pause=None) -> tuple:
+        """The week `which`, drawn now if need be. `shown` is the week on the screen."""
+        if key != self.key:
+            self.kept.clear()
+            self.key = key
+        if not self.fresh(which, key, now):
+            for other in [o for o in self.kept if o not in (0, which) and abs(o - shown) > 1]:
+                del self.kept[other]
+            img, hits, events = self.draw(which, now, pause)
+            self.kept[which] = (img, hits, events, next_turn(events, now))
+        return self.kept[which][:3]
+
+
 def compose(cfg: dict, tz: ZoneInfo, data: list, fetched_at: float | None, offset: int, now: datetime | None = None,
-            hits: list | None = None, forecast=None) -> tuple[Image.Image, list]:
-    """(picture of the week `offset` weeks from this one, the events it was drawn from)."""
+            hits: list | None = None, forecast=None, pause=None) -> tuple[Image.Image, list]:
+    """(picture of the week `offset` weeks from this one, the events it was drawn from).
+    `pause` goes to render_week()."""
     now = now or datetime.now(tz)
     start = week_start(now.date(), cfg.get("first_weekday", 6)) + timedelta(weeks=offset)
     if fetched_at is None:
@@ -267,7 +329,7 @@ def compose(cfg: dict, tz: ZoneInfo, data: list, fetched_at: float | None, offse
     if not data:
         message = ("No calendars yet. Connect the frame to a computer with its USB cable, open the drive "
                    "named FRAME and follow the link to the settings page.")
-    return render_week(start, events, now, note, stale, hits, forecast, message), events
+    return render_week(start, events, now, note, stale, hits, forecast, message, pause), events
 
 
 def main() -> None:
@@ -326,6 +388,18 @@ def main() -> None:
     view, chosen, chosen_day, day_first, back_to = "week", None, None, 0, "week"
     offset, last_touch, drawn_minute, dirty = 0, time.monotonic(), None, True
     hits: list = []
+    stamp, ahead_failed = 0, None      # arrivals of new data so far; the `stamp` at which drawing ahead failed
+
+    def draw_week(which: int, now: datetime, pause) -> tuple:
+        found: list = []
+        img, events = compose(cfg, tz, data, fetched_at, which, now, found, forecast, pause)
+        return img, found, events
+
+    def touched() -> None:
+        if touch and select.select([touch[0].fd], [], [], 0)[0]:
+            raise Touched
+
+    weeks = Weeks(draw_week)
 
     try:
         while True:
@@ -337,6 +411,7 @@ def main() -> None:
                     data, fetched_at = value
                 else:
                     forecast = value
+                stamp += 1
                 dirty = True
             if asked["saver"]:
                 asked["saver"] = False
@@ -351,7 +426,7 @@ def main() -> None:
                 view, offset, dirty = "saver", 0, True
                 backlight.dim()
             now = datetime.now(tz)
-            minute = (now.date(), now.hour, now.minute)
+            minute = int(now.timestamp() // 60)   # counted from 1970, so the hour that comes twice in autumn is two
             if minute != drawn_minute:           # the clock, "now" marks and today's highlight
                 dirty = True
             if dirty:
@@ -364,8 +439,7 @@ def main() -> None:
                         message = "" if place else "Type your town on the settings page to see the weather here."
                         img = render_weather(forecast, now, message or "The forecast has not arrived yet.")
                     else:
-                        week_hits: list = []
-                        img, events = compose(cfg, tz, data, fetched_at, offset, now, week_hits, forecast)
+                        img, week_hits, events = weeks.get(offset, (minute, stamp), now, offset)
                         if view == "detail" and chosen is not None:
                             if back_to == "day" and chosen_day is not None:
                                 img = render_day(img, chosen_day, events, now, first=day_first)
@@ -392,7 +466,24 @@ def main() -> None:
                 touch = open_touch()
             fds = [wake_r] + ([touch[0].fd] if touch else [])
             wait = min(TICK_S, 60.5 - datetime.now(tz).second)
-            ready = select.select(fds, [], [], wait)[0]
+            # While the week is on show and no finger is on the glass, draw the weeks a swipe or
+            # the Today button would ask for next, so that those only have to show a picture.
+            # A finger that arrives meanwhile ends the drawing (Touched) and goes first.
+            ahead = None
+            if view == "week" and touch and fetched_at is not None and ahead_failed != stamp and not finger_down(pos):
+                first = week_start(now.date(), cfg.get("first_weekday", 6))
+                ahead = next((o for o in (offset + 1, offset - 1, 0) if not weeks.fresh(o, (minute, stamp), now) and read_ahead(
+                    data, first + timedelta(weeks=o), first + timedelta(weeks=o, days=6))), None)
+            ready = select.select(fds, [], [], wait if ahead is None else AHEAD_PAUSE_S)[0]
+            if ahead is not None and not ready:
+                try:
+                    weeks.get(ahead, (minute, stamp), now, offset, touched)
+                except Touched:
+                    pass
+                except Exception as err:
+                    print(f"week not drawn ahead: {type(err).__name__}", file=sys.stderr)
+                    ahead_failed = stamp
+                continue
             if wake_r in ready:
                 try:
                     os.read(wake_r, 64)
@@ -407,8 +498,9 @@ def main() -> None:
                 print(f"touch input lost: {err}", file=sys.stderr)
                 touch = None
                 continue
+            before = (view, offset, chosen, chosen_day, day_first)
             for down, up in pairs:
-                last_touch, dirty = time.monotonic(), True
+                last_touch = time.monotonic()
                 x, y = to_picture(*down, xmax, ymax, flip_x, flip_y)
                 move = gesture((x, y), to_picture(*up, xmax, ymax, flip_x, flip_y))
                 if view == "saver":                       # a touch only wakes the screen; the rest of
@@ -440,6 +532,8 @@ def main() -> None:
                         view, chosen, back_to = "detail", target, "week"
                     elif isinstance(target, date):
                         view, chosen_day, day_first = "day", target, 0
+            if (view, offset, chosen, chosen_day, day_first) != before:    # a touch that changed nothing
+                dirty = True                                               # needs no new picture
     finally:
         backlight.restore()
 
