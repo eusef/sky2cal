@@ -14,11 +14,14 @@ from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 KNOWN_KEYS = ("timezone", "first_weekday", "cache_dir", "feeds", "refresh_minutes",
-              "touch_flip_x", "touch_flip_y")
+              "touch_flip_x", "touch_flip_y", "weather_place", "weather_units", "screensaver_minutes")
 WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 REFRESH_MIN, REFRESH_MAX = 5, 1440
 MAX_FEEDS = 20
 MAX_FEED_LEN = 2000
+MAX_PLACE_LEN = 80
+WEATHER_UNITS = ("fahrenheit", "celsius")
+SAVER_DEFAULT, SAVER_MAX = 10, 720     # minutes; the default matches skycal.frame.SAVER_DEFAULT_MIN
 
 
 def atomic_write(path: Path, text: str, errors: str = "strict") -> None:
@@ -166,6 +169,11 @@ def valid_timezone(name: str) -> bool:
         return True
     except Exception:
         return False
+
+
+def valid_place(text: str) -> bool:
+    """A town, "Town, Region", a postal code or "latitude, longitude"; empty turns the weather off."""
+    return len(text) <= MAX_PLACE_LEN and (not text or text.isprintable())
 
 
 # ---- Wi-Fi network list (wpa_supplicant) ----

@@ -7,5 +7,9 @@ feeds = [
   "https://calendar.google.com/calendar/ical/%23moonphase%40group.v.calendar.google.com/public/basic.ics",
 ]
 # refresh_minutes = 10             # how often the feeds are fetched again
+# weather_place = "Springfield, Illinois"   # town for the hourly forecast (from open-meteo.com); also a postal
+#                                  # code or "latitude, longitude". Not set: no weather, nothing is sent
+# weather_units = "fahrenheit"     # or "celsius"
+# screensaver_minutes = 10         # minutes without a touch before the screensaver; 0 = never
 # touch_flip_x = true              # touch panel orientation against the framebuffer; both default
 # touch_flip_y = true              # to true, which is what the Skylight Frame 2 needs

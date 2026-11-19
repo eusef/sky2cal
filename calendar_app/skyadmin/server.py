@@ -48,6 +48,9 @@ MESSAGES = {
     "bad_tz": (False, "That time zone was not recognised. Use a name such as America/Los_Angeles or Europe/London."),
     "bad_weekday": (False, "Choose a day for the week to start on."),
     "bad_refresh": (False, f"The update interval must be a whole number from {S.REFRESH_MIN} to {S.REFRESH_MAX} minutes."),
+    "bad_place": (False, f"The town was not accepted. Use a name of at most {S.MAX_PLACE_LEN} characters, or leave it empty."),
+    "bad_units": (False, "Choose Fahrenheit or Celsius."),
+    "bad_saver": (False, f"The screensaver time must be a whole number from 0 to {S.SAVER_MAX} minutes."),
     "bad_ssid": (False, "The network name must be between 1 and 32 characters."),
     "bad_pass": (False, "The Wi-Fi password must be 8 to 63 characters (letters, digits and common symbols)."),
     "need_pass": (False, "Type the Wi-Fi password, or tick the box if the network has no password (not both)."),
@@ -254,9 +257,26 @@ class App:
                  f'value="{escape(str(cfg.get("refresh_minutes", 10)))}">'
                  "<button>Save calendar settings</button></form></section>")
 
+        wu = cfg.get("weather_units", S.WEATHER_UNITS[0])
+        units = "".join(f'<option value="{u}"{" selected" if u == wu else ""}>{u.capitalize()}</option>' for u in S.WEATHER_UNITS)
+        b.append(f'<section id="weather"><h2>Weather</h2><form method="post" action="/weather/save">{h}'
+                 '<label for="wp">Town for the weather forecast</label>'
+                 f'<input type="text" id="wp" name="weather_place" maxlength="{S.MAX_PLACE_LEN}" '
+                 f'value="{escape(str(cfg.get("weather_place", "")))}">'
+                 '<p class="hint">A town and its state or country, for example "Springfield, Illinois", or a postal code. '
+                 'Leave it empty to turn the weather off. The frame looks the place up at open-meteo.com '
+                 'and fetches the forecast for it from there, giving the frame\'s time zone; nothing else is sent.</p>'
+                 f'<label for="wu">Temperatures in</label><select id="wu" name="weather_units">{units}</select>'
+                 "<button>Save weather settings</button></form></section>")
+
         fx = " checked" if cfg.get("touch_flip_x", True) else ""
         fy = " checked" if cfg.get("touch_flip_y", True) else ""
         b.append(f'<section id="display"><h2>Display</h2><form method="post" action="/display/save">{h}'
+                 '<label for="ss">Show the screensaver after this many minutes without a touch</label>'
+                 f'<input type="number" id="ss" name="screensaver_minutes" required min="0" max="{S.SAVER_MAX}" '
+                 f'value="{escape(str(cfg.get("screensaver_minutes", S.SAVER_DEFAULT)))}">'
+                 '<p class="hint">The screensaver dims the screen and shows the time, the weather and what comes next. '
+                 'A touch brings the calendar back. 0 turns it off.</p>'
                  '<p class="hint">Change these only if taps on the screen land in the wrong place. Both are normally ticked.</p>'
                  f'<label class="c"><input type="checkbox" name="touch_flip_x" value="1"{fx}> Mirror touch left to right</label>'
                  f'<label class="c"><input type="checkbox" name="touch_flip_y" value="1"{fy}> Mirror touch top to bottom</label>'
@@ -336,9 +356,25 @@ class App:
             cfg.update(timezone=tz, first_weekday=int(wd), refresh_minutes=int(rm))
         return self._change_config(change, "saved", "calendar")
 
-    def act_display_save(self, form) -> tuple[str, str]:
+    def act_weather_save(self, form) -> tuple[str, str]:
+        place, units = " ".join(form("weather_place").split()), form("weather_units")
+
         def change(cfg):
-            cfg.update(touch_flip_x=form("touch_flip_x") == "1", touch_flip_y=form("touch_flip_y") == "1")
+            if not S.valid_place(place):
+                return "bad_place"
+            if units not in S.WEATHER_UNITS:
+                return "bad_units"
+            cfg.update(weather_place=place, weather_units=units)
+        return self._change_config(change, "saved", "weather")
+
+    def act_display_save(self, form) -> tuple[str, str]:
+        ss = form("screensaver_minutes").strip()
+
+        def change(cfg):
+            if not re.fullmatch(r"[0-9]{1,4}", ss) or int(ss) > S.SAVER_MAX:
+                return "bad_saver"
+            cfg.update(touch_flip_x=form("touch_flip_x") == "1", touch_flip_y=form("touch_flip_y") == "1",
+                       screensaver_minutes=int(ss))
         return self._change_config(change, "saved", "display")
 
     def act_wifi_scan(self, form) -> tuple[str, str]:
@@ -381,7 +417,7 @@ class App:
 
     POSTS = {"/wifi/scan": act_wifi_scan, "/wifi/join": act_wifi_join, "/feed/add": act_feed_add,
              "/feed/remove": act_feed_remove, "/calendar/save": act_calendar_save,
-             "/display/save": act_display_save, "/do/restart": act_restart, "/do/reboot": act_reboot}
+             "/weather/save": act_weather_save, "/display/save": act_display_save, "/do/restart": act_restart, "/do/reboot": act_reboot}
 
 
 class Handler(BaseHTTPRequestHandler):

@@ -1,11 +1,14 @@
 """Fetch iCalendar feeds and expand them into per-day events.
 
-The frame only ever makes outbound HTTPS GETs to the configured feed URLs.
+Only outbound HTTPS GETs to the configured feed URLs are made here (weather.py makes the
+frame's only other requests).
 A failed fetch falls back to the last good copy on disk.
 """
 from __future__ import annotations
 
 import hashlib
+import html
+import re
 import urllib.request
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
@@ -16,6 +19,23 @@ import icalendar
 import recurring_ical_events
 
 MAX_FEED_BYTES = 20 * 1024 * 1024
+MAX_NOTES = 1200
+_BREAK = re.compile(r"<(?:br|/p|/div|/li)\s*/?>", re.I)    # one \s* only: two in a row backtrack badly
+_TAG = re.compile(r"</?(?:a|b|i|u|p|br|div|span|ul|ol|li|html|body|head|strong|em|h[1-6]|font|table|tbody|tr|td|th|"
+                  r"blockquote|pre|code|hr|img|small|sub|sup|s)\b[^<>]{0,2000}>", re.I)
+MAX_TITLE = 300
+
+
+def plain(text: str, limit: int = MAX_NOTES) -> str:
+    """Calendar text as plain text: HTML tags dropped (some calendars store notes as HTML; other
+    text in angle brackets, such as an email address, is kept), entities decoded, blank lines
+    and runs of spaces collapsed, cut to `limit` characters."""
+    text = text[:20 * limit]             # bounds the work below, whatever the calendar sends
+    if "<" in text and ">" in text:
+        text = _TAG.sub("", _BREAK.sub("\n", text))
+    lines = [" ".join(line.split()) for line in html.unescape(text).splitlines()]
+    text = "\n".join(line for line in lines if line)
+    return text if len(text) <= limit else text[:limit].rstrip() + "…"
 
 
 @dataclass(frozen=True)
@@ -25,6 +45,8 @@ class Event:
     all_day: bool
     title: str
     cal: int  # index of the feed it came from
+    location: str = ""
+    description: str = ""  # plain text, at most MAX_NOTES characters
 
 
 class _HttpsOnlyRedirects(urllib.request.HTTPRedirectHandler):
@@ -80,17 +102,20 @@ def events_between(ics: bytes, first: date, last: date, tz: ZoneInfo, cal: int =
             continue
         start = comp["DTSTART"].dt
         end_prop = comp.get("DTEND")
-        title = str(comp.get("SUMMARY", "")).strip() or "(no title)"
+        title = " ".join(str(comp.get("SUMMARY", "")).split())[:MAX_TITLE] or "(no title)"   # always one line
+        where, notes = comp.get("LOCATION", ""), comp.get("DESCRIPTION", "")
+        where = plain(str(where[0] if isinstance(where, list) and where else where), 300)   # a repeated property
+        notes = plain(str(notes[0] if isinstance(notes, list) and notes else notes))        # comes as a list
         if not isinstance(start, datetime):  # all-day: plain dates, in the viewer's zone
             end = end_prop.dt if end_prop is not None else start + timedelta(days=1)
             if end <= start:
                 end = start + timedelta(days=1)
-            ev = Event(datetime.combine(start, time.min, tz), datetime.combine(end, time.min, tz), True, title, cal)
+            ev = Event(datetime.combine(start, time.min, tz), datetime.combine(end, time.min, tz), True, title, cal, where, notes)
         else:
             end = end_prop.dt if end_prop is not None else start
             if start.tzinfo is None:  # floating time: same wall clock everywhere
                 start, end = start.replace(tzinfo=tz), end.replace(tzinfo=tz)
-            ev = Event(start.astimezone(tz), end.astimezone(tz), False, title, cal)
+            ev = Event(start.astimezone(tz), end.astimezone(tz), False, title, cal, where, notes)
         if ev.start < hi and (ev.end > lo or ev.start >= lo):
             out.append(ev)
     return out

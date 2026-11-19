@@ -14,6 +14,8 @@ LoadCredential=config:/etc/skycal/config.toml
 WorkingDirectory=/opt/skycal
 # Stop the kernel text console from drawing over the calendar ("+" = run as root).
 ExecStartPre=+/bin/sh -c 'for c in /sys/class/vtconsole/vtcon*; do grep -q "frame buffer" $$c/name && echo 0 > $$c/bind; done; true'
+# The screensaver dims the backlight: let the video group write its brightness.
+ExecStartPre=+/bin/sh -c 'for b in /sys/class/backlight/*/brightness; do chgrp video $$b && chmod 664 $$b; done; true'
 ExecStart=/usr/bin/python3 -m skycal.frame --config %d/config --cache-dir /var/lib/skycal
 Restart=always
 RestartSec=10
@@ -22,6 +24,8 @@ ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
 ProtectKernelTunables=yes
+# The one exception to the line above: the backlight level ("-" = fine if there is none).
+ReadWritePaths=-/sys/class/backlight
 ProtectKernelModules=yes
 ProtectControlGroups=yes
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX

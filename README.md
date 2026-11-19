@@ -193,7 +193,7 @@ After this there is no adb. Access is SSH, over Wi-Fi or the USB cable.
 
 | Check | Command | Expected |
 |---|---|---|
-| Render a week on the Mac | `cd calendar_app && python3 -m venv .venv && .venv/bin/pip install pillow icalendar recurring-ical-events && cp config.example.toml config.toml && .venv/bin/python -m skycal --config config.toml --png week.png` | `week.png: week of ..., N events, fresh` and a 1280x800 picture |
+| Render a week on the Mac | `cd calendar_app && python3 -m venv .venv && .venv/bin/pip install pillow icalendar recurring-ical-events && cp config.example.toml config.toml && .venv/bin/python -m skycal --config config.toml --png week.png` (add `--screen weather`, `saver`, `day` or `detail` for the other screens) | `week.png: week, week of ..., N events, fresh` and a 1280x800 picture |
 | Packer against a stock image | `python3 port/rkimg.py selftest <backup>/partitions/recovery.img` | `True` twice |
 | Kernel build | Step 4 | `OK: zImage-dtb ...` |
 | Root filesystem build | Step 7 | `OK: port/images/rootfs.ext4` |
@@ -210,7 +210,8 @@ For owners, no terminal needed:
 | Status | Wi-Fi network and state, the frame's address on Wi-Fi, when the calendars were last fetched, kernel version |
 | Wi-Fi | Search for networks and join one. Networks the frame already knows are kept |
 | Calendar | Add and remove calendar feeds (https only; shown masked, never in full), time zone, first day of the week, refresh interval |
-| Display | Flip the touch axes, for when taps land in the wrong place |
+| Weather | The town for the forecast and Fahrenheit or Celsius. Empty town: no weather |
+| Display | Minutes without a touch before the screensaver (0 turns it off). Flip the touch axes, for when taps land in the wrong place |
 | Maintenance | Restart the calendar, restart the frame (each asks for confirmation) |
 
 A save takes effect at once: the page rewrites `/etc/skycal/config.toml` or the Wi-Fi file and restarts the service concerned. Comments in `config.toml` are not kept when the page rewrites it.
@@ -248,13 +249,27 @@ A frame installed from a current Debian image and kernel has all of it from the 
 | Windows | Not tested. Windows 11 brings drivers for all three functions, so it is expected to work |
 | Linux hosts | Not tested |
 
+## Using the calendar
+
+| On the screen | What it does |
+|---|---|
+| Tap an event | Its details: when, where and its notes. Tap anywhere to close |
+| Tap a day's heading, or "+N more" | Every event of that day as a list; tap one for its details |
+| Tap ‹, ›, or swipe sideways | Another week. "Today" goes back; so does five minutes without a touch |
+| Tap the weather button (top right, shows the current conditions) | Hour by hour for today and tomorrow: conditions, temperature, chance of rain, with the day's high, low, sunrise and sunset |
+| Leave it alone | After 10 minutes (changeable) the screensaver: a dimmed, dark screen with the time, the date, the weather and the next three events. Any touch brings the calendar back |
+
+Finished events are drawn faded and the one in progress is outlined. The week view was checked on the reference frame on 2026-11-19 (taps and swipes fed in through the touch device, screen read back from the framebuffer): event details, day list, swipe, screensaver with the backlight going from 128 to 25 and back (also after a service restart while dimmed). The forecast screen, the weather button and the screensaver's weather line were checked the same way with a town saved through the settings page.
+
+The weather is off until a town is set on the settings page. With a town set, the frame sends the town's name to `geocoding-api.open-meteo.com` once and its coordinates to `api.open-meteo.com` every 30 minutes (https, no account). Those are the frame's only requests besides the calendar feeds.
+
 ## Day to day
 
 | Task | How |
 |---|---|
 | Update the calendar app | On the Mac: `bash calendar_app/deploy.sh '<frame address>'` (never touches the config on the frame) |
 | Update the kernel | See "Updating the kernel" |
-| Change Wi-Fi, calendars, time zone or week start | Plug in the USB cable and open the settings page (see "Settings page over USB"). By hand: edit `/etc/skycal/config.toml` on the frame, `systemctl restart skycal` |
+| Change Wi-Fi, calendars, time zone, week start, weather town or screensaver time | Plug in the USB cable and open the settings page (see "Settings page over USB"). By hand: edit `/etc/skycal/config.toml` on the frame, `systemctl restart skycal` |
 | Update the settings page | The same `deploy.sh` run as the calendar app |
 | Logs | `journalctl -u skycal` on the frame; `journalctl -u skyadmin` for the settings page (it logs no calendar addresses or passphrases) |
 | OS updates | Automatic (unattended-upgrades) |
