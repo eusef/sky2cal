@@ -30,6 +30,7 @@ class Original:
     DAYHEAD_H = R.DAYHEAD_H
     PAD = R.PAD
     ALERT_H = 44                 # the band of weather alerts at the foot of the week
+    GEAR_INK: tuple | None = None  # colour of the settings gear; the text colour when None
 
     BG = R.BG
     INK = R.INK
@@ -90,7 +91,7 @@ class Original:
         hh = self.HEADER_H
         _text(d, (20, hh // 2), title, font=self.f(34, True), fill=self.INK, anchor="lm")
 
-        right = NAV["weather"][0] - 18
+        right = NAV["settings"][0] - 18
         if note:       # the clock above, the status below it
             room = right - (20 + d.textlength(title, font=self.f(34, True)) + 24)
             _text(d, (right, 27), fmt_time(now), font=self.f(24, True), fill=self.INK, anchor="rm")
@@ -98,10 +99,17 @@ class Original:
                   anchor="rm")
         else:
             _text(d, (right, hh // 2), fmt_time(now), font=self.f(28, True), fill=self.INK, anchor="rm")
+        self.settings_button(d)
         self.weather_button(d, weather.at(now) if weather else None)
         self.button(d, NAV["prev"], "‹", 36, 4)
         self.button(d, NAV["today"], "Today", 22)
         self.button(d, NAV["next"], "›", 36, 4)
+
+    def settings_button(self, d: ImageDraw.ImageDraw) -> None:
+        """The gear that shows the QR code for the settings page: the style's button with a gear on it."""
+        box = NAV["settings"]
+        self.button(d, box, "", 22)
+        R.gear_icon(d, (box[0] + box[2]) / 2, (box[1] + box[3]) / 2, 30, self.GEAR_INK or self.INK)
 
     def weather_button(self, d: ImageDraw.ImageDraw, hour) -> None:
         """The weather button: the current conditions when there is a forecast, else the word."""
@@ -558,6 +566,49 @@ class Original:
             _text(d, (x, y), lead, font=lead_f, fill=color, anchor="lm")
             _text(d, (x + lw + 18, y), title, font=title_f, fill=self.NIGHT_MUTED, anchor="lm")
             y += 46
+        return img
+
+    # ---- settings QR code ----
+
+    SETTINGS_STEPS = ("Point your phone's camera at the code and open the link.",
+                      "Your phone must be on the same Wi-Fi as the frame.",
+                      "The code works once, and only while it is on screen.")
+
+    def render_settings(self, base: Image.Image, url: str | None, now: datetime, message: str) -> Image.Image:
+        """A card with the QR code on the left and how to use it on the right; only words when
+        there is no code to show. The code is always black on white, whatever the style."""
+        probe = ImageDraw.Draw(base)
+        width = 880
+        qr = R.qr_image(url, 380) if url else None
+        if url and qr is None:
+            message = message or "The QR code cannot be drawn on this frame. Type this address on your phone instead:"
+        title_f, body_f, small_f = self.f(30, True), self.f(21), self.f(17)
+        left = 40 + (qr.width + 36 if qr else 6)
+        text_w = width - left - 40
+        title = wrap(probe, "Settings on your phone", title_f, text_w, 2)
+        paras = [wrap(probe, t, body_f, text_w, 3) for t in (self.SETTINGS_STEPS if qr else (message,))]
+        address = wrap(probe, url, small_f, text_w, 3) if url else []
+        text_h = 40 * len(title) + 14 + sum(28 * len(p) + 14 for p in paras) + (10 + 22 * len(address) if address else 0)
+        height = max(qr.height if qr else 0, text_h) + 40 + 70
+        img, d, box = self.card(base, height, width)
+        x0, y0, x1, y1 = box
+        if qr:
+            img.paste(qr, (x0 + 40, y0 + 40))
+        x, y = x0 + left, y0 + 44
+        for line in title:
+            _text(d, (x, y), line, font=title_f, fill=self.INK)
+            y += 40
+        y += 14
+        for para in paras:
+            for line in para:
+                _text(d, (x, y), line, font=body_f, fill=self.INK)
+                y += 28
+            y += 14
+        y += 10
+        for line in address:
+            _text(d, (x, y), line, font=small_f, fill=self.MUTED)
+            y += 22
+        self.card_hint(d, box, "Tap anywhere to close")
         return img
 
     @staticmethod

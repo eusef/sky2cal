@@ -193,7 +193,7 @@ After this there is no adb. Access is SSH, over Wi-Fi or the USB cable.
 
 | Check | Command | Expected |
 |---|---|---|
-| Render a week on the Mac | `cd calendar_app && python3 -m venv .venv && .venv/bin/pip install pillow icalendar recurring-ical-events && cp config.example.toml config.toml && .venv/bin/python -m skycal --config config.toml --png week.png` (add `--screen weather`, `saver`, `day`, `detail` or `alerts` for the other screens, `--theme <name>` for another style) | `week.png: week, week of ..., N events, fresh` and a 1280x800 picture |
+| Render a week on the Mac | `cd calendar_app && python3 -m venv .venv && .venv/bin/pip install pillow icalendar recurring-ical-events segno && cp config.example.toml config.toml && .venv/bin/python -m skycal --config config.toml --png week.png` (add `--screen weather`, `saver`, `day`, `detail` or `alerts` for the other screens, `--theme <name>` for another style) | `week.png: week, week of ..., N events, fresh` and a 1280x800 picture |
 | Packer against a stock image | `python3 port/rkimg.py selftest <backup>/partitions/recovery.img` | `True` twice |
 | Kernel build | Step 4 | `OK: zImage-dtb ...` |
 | Root filesystem build | Step 7 | `OK: port/images/rootfs.ext4` |
@@ -216,9 +216,14 @@ For owners, no terminal needed:
 
 A save takes effect at once: the page rewrites `/etc/skycal/config.toml` or the Wi-Fi file and restarts the service concerned. Comments in `config.toml` are not kept when the page rewrites it.
 
+### From a phone on the same Wi-Fi
+
+Once the frame is on Wi-Fi, the cable is not needed: tap the gear at the top of the calendar and point a phone's camera at the QR code that appears. The phone must be on the same Wi-Fi network. It opens the same page, at `http://<the frame's Wi-Fi address>:8080`, and stays signed in for an hour. When the frame is not on Wi-Fi, the gear says so instead.
+
 ### How it is protected
 
-- There is no login: holding the cable is the key. The page (`skyadmin`) listens on the cable's address only, and the firewall admits it from `usb0` only, so it is unreachable over Wi-Fi.
+- Over the cable there is no login: holding the cable is the key. The page (`skyadmin`) listens on the cable's address, port 80, and the firewall admits that port from `usb0` only.
+- Over Wi-Fi, seeing the frame is the key. The page also listens on port 8080, which the firewall admits from `wlan0` only, and turns away every request there that does not carry the code from the QR code or the session it leads to. The code is random (128 bits), works once, only while the card is on screen and for at most 10 minutes; the session lasts an hour and is held in memory only, so a restart of the page ends it. This is plain HTTP: someone able to read the Wi-Fi traffic could see the session and the page, as with any device's page on a home network.
 - The computer keeps its own internet connection. The frame hands out an address, but no route and no DNS.
 - Calendar addresses are secrets, so the page never shows one in full. A Wi-Fi passphrase is stored only as its derived key.
 - Every change needs a token that only the page itself carries, and requests that name another host are refused, so another website open in the same browser cannot change settings.
@@ -257,6 +262,7 @@ A frame installed from a current Debian image and kernel has all of it from the 
 | Tap a day's heading, or "+N more" | Every event of that day as a list; tap one for its details |
 | Tap ‹, ›, or swipe sideways | Another week. "Today" goes back; so does five minutes without a touch |
 | Tap the red, orange or amber band at the foot of the week (only while a weather alert is in force) | The alert in full: what, where, until when, what to do. With several alerts, a row leads to the next. Tap anywhere else to close |
+| Tap the gear (top right, left of the weather) | A QR code that opens the settings page on a phone on the same Wi-Fi (see "From a phone on the same Wi-Fi"). Tap anywhere to close; it closes by itself after five minutes, and its code stops working then |
 | Tap the weather button (top right, shows the current conditions) | Hour by hour for today and tomorrow: conditions, temperature, chance of rain, with the day's high, low, sunrise and sunset |
 | Leave it alone | After 10 minutes (changeable) the screensaver: a dimmed, dark screen with the time, the date, the weather, any weather alert and the next events. Any touch brings the calendar back |
 

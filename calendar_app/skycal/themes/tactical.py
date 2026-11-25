@@ -282,7 +282,7 @@ class Tactical(Original):
         week = (start + timedelta(days=1)).isocalendar()[1]
         caption = f"WEEK {week:02d}" + ("  //  THIS WEEK" if start <= now.date() < start + timedelta(days=7) else "")
         end = self.title_block(d, caption, self.week_title(start).upper())
-        right = NAV["weather"][0] - 18
+        right = NAV["settings"][0] - 18
         if note:
             room = right - end - 24
             self.clock(d, right, 26, 30, now)
@@ -291,6 +291,7 @@ class Tactical(Original):
                   anchor="rm")
         else:
             self.clock(d, right, self.HEADER_H // 2 + 1, 38, now)
+        self.settings_button(d)
         self.weather_button(d, weather.at(now) if weather else None)
         self.button(d, NAV["prev"], "‹", 36, 4)
         self.button(d, NAV["today"], "Today", 20)

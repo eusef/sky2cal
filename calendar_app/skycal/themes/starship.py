@@ -170,6 +170,7 @@ def _code(*parts: int) -> str:
 class Starship(Original):
     name = "starship"
     label = "Starship (TNG-inspired)"
+    GEAR_INK = BLACK             # the gear is drawn like the style's button labels
 
     DAYHEAD_H = 72               # day buttons: events start at 76 + 72 + 6
     ALERT_H = 44
@@ -270,7 +271,7 @@ class Starship(Original):
 
     def header(self, d, start: date, now: datetime, note: str, stale: bool, weather: Weather | None) -> None:
         _text(d, (S - 8, 10), f"{start.isocalendar()[1]:02d}", font=A(22, 700), fill=BLACK, anchor="ra")
-        right = NAV["weather"][0] - 14
+        right = NAV["settings"][0] - 14
         clock = fmt_time(now).upper()
         cf = A(34 if note else 40, 500)
         clock_w = d.textlength(clock, font=cf)
@@ -284,6 +285,7 @@ class Starship(Original):
             _text(d, (right, 50), fit(d, note.upper(), nf, room), font=nf, fill=self.WARN if stale else MUTED, anchor="rm")
         else:
             _text(d, (right, 31), clock, font=cf, fill=GOLD, anchor="rm")
+        self.settings_button(d)
         self.weather_button(d, weather.at(now) if weather else None)
         self.button(d, NAV["prev"], "‹", 36)
         self.button(d, NAV["today"], "Today", 28, color=ORANGE)

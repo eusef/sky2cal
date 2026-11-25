@@ -266,7 +266,7 @@ class Sports(Original):
         hh = self.HEADER_H
         title_f = df(44, "black")
         _text(d, (24, hh // 2 + 1), title, font=title_f, fill=self.INK, anchor="lm")
-        right = NAV["weather"][0] - 20
+        right = NAV["settings"][0] - 20
         if note:
             room = right - (24 + d.textlength(title, font=title_f) + 24)
             _text(d, (right, 28), fmt_time(now).upper(), font=df(32, "black"), fill=self.INK, anchor="rm")
@@ -275,6 +275,7 @@ class Sports(Original):
                   fill=self.WARN if stale else (206, 212, 246), anchor="rm")
         else:
             _text(d, (right, hh // 2 + 1), fmt_time(now).upper(), font=df(40, "black"), fill=self.INK, anchor="rm")
+        self.settings_button(d)
         self.weather_button(d, weather.at(now) if weather else None)
         self.button(d, NAV["prev"], "‹", 36)
         self.button(d, NAV["today"], "Today", 22, hot=True)

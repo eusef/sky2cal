@@ -195,6 +195,7 @@ def _plaque(d: ImageDraw.ImageDraw, box: tuple, k: float, fill: tuple, outline: 
 class Fantasy(Original):
     name = "fantasy"
     label = "Dark fantasy"
+    GEAR_INK = GOLD_HI             # the gear is drawn like the style's button labels
 
     BG = (16, 12, 8)
     INK = (240, 228, 200)
@@ -311,7 +312,7 @@ class Fantasy(Original):
     def header(self, d: ImageDraw.ImageDraw, start: date, now: datetime, note: str, stale: bool,
                weather: Weather | None) -> None:
         hh = self.HEADER_H
-        right = NAV["weather"][0] - 20
+        right = NAV["settings"][0] - 20
         title_f = self.cap(32, 700)
         clock = fmt_time(now).upper()
         title = fit(d, self.week_title(start).upper(), title_f, 560)
@@ -323,6 +324,7 @@ class Fantasy(Original):
                   fill=self.WARN if stale else self.MUTED, anchor="rm")
         else:
             self.engraved(d, (right, hh // 2), clock, self.cap(30, 700), self.INK, "rm")
+        self.settings_button(d)
         self.weather_button(d, weather.at(now) if weather else None)
         self.button(d, NAV["prev"], "‹", 36)
         self.button(d, NAV["today"], "Today", 22)

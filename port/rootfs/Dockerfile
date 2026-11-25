@@ -14,7 +14,7 @@ RUN sed -i 's/^Components: main$/Components: main non-free-firmware/' /etc/apt/s
       openssh-server nftables wpasupplicant iw wireless-regdb firmware-brcm80211 \
       unattended-upgrades needrestart apt-utils ca-certificates tzdata \
       iproute2 iputils-ping e2fsprogs dosfstools mtools less nano \
-      python3 python3-pil python3-icalendar python3-recurring-ical-events python3-evdev \
+      python3 python3-pil python3-icalendar python3-recurring-ical-events python3-evdev python3-segno \
       fonts-dejavu-core \
  && apt-get clean
 

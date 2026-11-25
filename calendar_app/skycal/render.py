@@ -42,7 +42,9 @@ NIGHT_INK = (205, 205, 210)
 NIGHT_MUTED = (130, 130, 140)
 
 # Hit boxes of the week view's header buttons, shared with the touch handler: name -> (x0, y0, x1, y1).
-NAV = {"weather": (836, 12, 998, 64), "prev": (1010, 12, 1074, 64), "today": (1082, 12, 1198, 64),
+# "settings" is the gear that shows the QR code for the settings page (see remote.py).
+# Order matters where the tap margins of two buttons overlap: the earlier one wins.
+NAV = {"weather": (836, 12, 998, 64), "settings": (772, 12, 824, 64), "prev": (1010, 12, 1074, 64), "today": (1082, 12, 1198, 64),
        "next": (1206, 12, 1270, 64)}
 CLOSE = (1150, 12, 1270, 64)     # "Back" button of the weather screen
 
@@ -306,6 +308,46 @@ def weather_icon(d: ImageDraw.ImageDraw, cx: int, cy: int, size: int, name: str,
                       fill=bolt)
 
 
+@lru_cache(maxsize=16)
+def _gear_mask(size: int) -> Image.Image:
+    big = size * 4
+    m = Image.new("L", (big, big), 0)
+    g = ImageDraw.Draw(m)
+    c, outer, body, hole = big / 2, big * 0.5, big * 0.36, big * 0.15
+    g.ellipse((c - body, c - body, c + body, c + body), fill=255)
+    for k in range(8):                       # eight teeth, each a short bar out from the body
+        a = k * math.pi / 4
+        dx, dy, px, py = math.cos(a), math.sin(a), -math.sin(a) * big * 0.085, math.cos(a) * big * 0.085
+        g.polygon([(c + dx * body * 0.8 + px, c + dy * body * 0.8 + py), (c + dx * outer + px, c + dy * outer + py),
+                   (c + dx * outer - px, c + dy * outer - py), (c + dx * body * 0.8 - px, c + dy * body * 0.8 - py)], fill=255)
+    g.ellipse((c - hole, c - hole, c + hole, c + hole), fill=0)
+    return m.resize((size, size), Image.LANCZOS)
+
+
+def gear_icon(d: ImageDraw.ImageDraw, cx: float, cy: float, size: int, fill: tuple) -> None:
+    """A settings gear `size` px across, from shapes, smoothed; its hole shows what is behind it."""
+    d.bitmap((round(cx - size / 2), round(cy - size / 2)), _gear_mask(size), fill=fill)
+
+
+@lru_cache(maxsize=4)
+def qr_image(text: str, size: int) -> Image.Image | None:
+    """`text` as a QR code: black on white with the usual quiet zone, at most `size` px square,
+    in whole pixels per module so a phone reads it easily. None when the QR library is missing."""
+    try:
+        import segno
+    except ImportError:
+        return None
+    rows = segno.make(text, error="m", micro=False).matrix
+    n = len(rows) + 8                         # four modules of white all round
+    img = Image.new("L", (n, n), 255)
+    for y, row in enumerate(rows):
+        for x, dark in enumerate(row):
+            if dark:
+                img.putpixel((x + 4, y + 4), 0)
+    scale = max(1, size // n)
+    return img.resize((n * scale, n * scale), Image.NEAREST).convert("RGB")
+
+
 def warn_icon(d: ImageDraw.ImageDraw, cx: float, cy: float, size: float, fill: tuple, ink: tuple) -> None:
     """A warning triangle with an exclamation mark, from shapes (not every font has the sign)."""
     s = size
@@ -444,6 +486,12 @@ def render_alerts(base: Image.Image, alerts: list, now: datetime, hits: list | N
 def render_weather(weather: Weather | None, now: datetime, message: str = "", alerts: list | tuple = ()) -> Image.Image:
     """Hour by hour for today and tomorrow. `message` is shown instead when there is no forecast."""
     return _draw("render_weather", (weather, now, message, list(alerts)))
+
+
+def render_settings(base: Image.Image, url: str | None, now: datetime, message: str = "") -> Image.Image:
+    """A card over the week with the QR code of the settings page (`url`), or `message` when
+    there is no address to show (the frame is not on Wi-Fi)."""
+    return _draw("render_settings", (base, url, now, message))
 
 
 def render_saver(now: datetime, events: list[Event], weather: Weather | None, alerts: list | tuple = ()) -> Image.Image:

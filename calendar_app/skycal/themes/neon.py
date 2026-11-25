@@ -290,7 +290,7 @@ class Neon(Original):
         _text(d, (40, 18), f"WEEK {week_no:02d}  //  SCHEDULE", font=self.f(13, True), fill=YELLOW, anchor="lm")
         self.glitch(d, (40, 47), title, tf, self.INK)
 
-        right = NAV["weather"][0] - 18
+        right = NAV["settings"][0] - 18
         if note:
             room = right - (40 + d.textlength(title, font=tf) + 24)
             _text(d, (right, 26), fmt_time(now), font=self.disp(24, 700), fill=YELLOW, anchor="rm")
@@ -298,6 +298,7 @@ class Neon(Original):
             _text(d, (right, 55), fit(d, note, nf, room), font=nf, fill=self.WARN if stale else self.MUTED, anchor="rm")
         else:
             _text(d, (right, hh // 2), fmt_time(now), font=self.disp(28, 700), fill=YELLOW, anchor="rm")
+        self.settings_button(d)
         self.weather_button(d, weather.at(now) if weather else None)
         self.button(d, NAV["prev"], "‹", 36, 4)
         self.button(d, NAV["today"], "Today", 22)

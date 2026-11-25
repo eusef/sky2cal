@@ -6,8 +6,8 @@ The panel is 800x1280 portrait, RGB565; the frame is mounted landscape with the 
 top edge on the right, so the 1280x800 picture is turned a quarter turn before it is written.
 
 Screens: the week (tap an event for its details, a day's heading or "+N more" for the whole
-day, the weather button for the hourly forecast, the alert band for the weather alerts;
-swipe sideways to change week), and a screensaver that takes over after a while without a
+day, the weather button for the hourly forecast, the alert band for the weather alerts, the
+gear for a QR code that opens the settings page on a phone (remote.py); swipe sideways to change week), and a screensaver that takes over after a while without a
 touch and dims the backlight. Any touch ends the screensaver. SIGUSR1 starts it at once (for
 testing). How the screens look is the theme named in the config (`theme`).
 """
@@ -30,10 +30,11 @@ from zoneinfo import ZoneInfo
 from PIL import Image, ImageChops
 
 from . import alerts as al
+from . import remote
 from . import weather as wx
 from .feed import Event, events_between, feed_key, read_feeds, read_feeds_apart
 from .render import (NAV, H, W, configure, fmt_time, render_alerts, render_day, render_detail, render_saver,
-                     render_weather, render_week, week_start)
+                     render_settings, render_weather, render_week, week_start)
 
 FB_W, FB_H = H, W            # 800 x 1280
 TAP_MARGIN = 24              # px of slack around each button
@@ -41,6 +42,7 @@ TAP_SLOP = 40                # a finger that moved less than this (px) made a ta
 SWIPE_MIN = 120              # a finger that moved at least this far sideways (px) made a swipe
 IDLE_BACK_S = 300            # return to the current week after this long without a touch
 CARD_BACK_S = 120            # close details, a day list or the weather after this long without a touch
+SETTINGS_BACK_S = 300        # close the settings QR code (and withdraw it) after this long without a touch
 RETRY_S = 60                 # fetch again this soon when a feed was not fresh
 WEATHER_S = 30 * 60          # how often the forecast is fetched again
 ALERTS_S = 5 * 60            # how often the weather alerts are fetched again
@@ -372,8 +374,9 @@ def main() -> None:
 
     cfg = tomllib.loads(args.config.read_text())
     tz = ZoneInfo(cfg["timezone"])
-    print(f"theme: {configure(str(cfg.get('theme', 'original')), feed_colors(cfg))}", file=sys.stderr)
     cache = args.cache_dir or Path(cfg.get("cache_dir", "cache"))
+    remote.drop_code(cache)          # one left behind by a calendar that stopped with the card open
+    print(f"theme: {configure(str(cfg.get('theme', 'original')), feed_colors(cfg))}", file=sys.stderr)
     refresh_s = max(1, int(cfg.get("refresh_minutes", 10))) * 60
     # Measured on the frame (2026-11-11): the touch panel is turned half a turn against the
     # framebuffer, so both axes are flipped unless the config says otherwise.
@@ -418,8 +421,9 @@ def main() -> None:
 
     touch = open_touch()
     pos: dict = {}
-    # view: "week", "detail" (one event), "day" (one day's list), "alerts", "weather" or "saver"
+    # view: "week", "detail" (one event), "day" (one day's list), "alerts", "weather", "settings" or "saver"
     view, chosen, chosen_day, day_first, back_to = "week", None, None, 0, "week"
+    settings_url, settings_note = None, ""     # what the settings card shows while view == "settings"
     alert_index = 0
     offset, last_touch, drawn_minute, dirty = 0, time.monotonic(), None, True
     hits: list = []
@@ -457,11 +461,16 @@ def main() -> None:
                     backlight.dim()
             if view in ("detail", "day", "weather", "alerts") and idle > CARD_BACK_S:
                 view, dirty = "week", True
+            if view == "settings" and idle > min(SETTINGS_BACK_S, remote.CODE_S):
+                view, dirty = "week", True
             if offset and idle > IDLE_BACK_S:
                 offset, dirty = 0, True
             if saver_s and touch and view != "saver" and idle > saver_s:    # never without a way back
                 view, offset, dirty = "saver", 0, True
                 backlight.dim()
+            if view != "settings" and settings_url:    # the card has closed: its code stops working
+                remote.drop_code(cache)
+                settings_url = None
             now = datetime.now(tz)
             minute = int(now.timestamp() // 60)   # counted from 1970, so the hour that comes twice in autumn is two
             if minute != drawn_minute:           # the clock, "now" marks and today's highlight
@@ -489,6 +498,8 @@ def main() -> None:
                         elif view == "alerts":
                             alert_index = alert_index if alert_index < len(running) else 0
                             img = render_alerts(img, running, now, hits, alert_index)
+                        elif view == "settings":
+                            img = render_settings(img, settings_url, now, settings_note)
                         else:
                             view, hits = "week", week_hits
                     show(img, args.fb)
@@ -552,7 +563,7 @@ def main() -> None:
                     break
                 elif view == "detail":                    # any touch closes the card
                     view = back_to
-                elif view == "weather":
+                elif view in ("weather", "settings"):  # any touch closes these
                     view = "week"
                 elif view == "alerts":                    # a tap on "Next alert" pages, any other closes
                     target = target_at(hits, x, y) if move == "tap" else None
@@ -575,6 +586,19 @@ def main() -> None:
                     target = None if name else target_at(hits, x, y)
                     if name == "weather":
                         view = "weather"
+                    elif name == "settings":
+                        view, settings_url, settings_note = "settings", None, ""
+                        address = remote.wifi_address()
+                        if address:
+                            try:
+                                settings_url = remote.settings_url(address, remote.new_code(cache))
+                            except OSError as err:
+                                print(f"settings code not saved: {type(err).__name__}", file=sys.stderr)
+                                settings_note = ("The code could not be made just now. Try again, or connect a "
+                                                 "computer with the USB cable and open the drive named FRAME.")
+                        elif not settings_url:
+                            settings_note = ("The frame is not on Wi-Fi. Connect a computer with the USB cable, "
+                                             "open the drive named FRAME and follow the link to the settings page.")
                     elif name:
                         offset = {"prev": offset - 1, "next": offset + 1, "today": 0}[name]
                     elif target == "alerts":
@@ -587,6 +611,7 @@ def main() -> None:
                 dirty = True                                               # needs no new picture
     finally:
         backlight.restore()
+        remote.drop_code(cache)      # a code must not outlive the card that showed it
 
 
 if __name__ == "__main__":
