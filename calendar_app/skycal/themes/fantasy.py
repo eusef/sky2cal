@@ -515,7 +515,7 @@ class Fantasy(Original):
         for side in (-1, 1):
             _stamp(d, cx + side * (tw / 2 + 34), cy, _blade(48, side < 0), GOLD_DIM)
 
-    def label(self, d: ImageDraw.ImageDraw, x: int, y: int, text: str, right: int) -> None:
+    def section_label(self, d: ImageDraw.ImageDraw, x: int, y: int, text: str, right: int) -> None:
         """A section heading in a card: gold capitals and a rule that fades out to the right."""
         f = self.cap(16, 800)
         _text(d, (x, y), text, font=f, fill=GOLD)
@@ -554,7 +554,7 @@ class Fantasy(Original):
         for label, lines in (("WHERE", where), ("NOTES", notes)):
             if lines:
                 y += 24
-                self.label(d, x, y, label, x1 - 44)
+                self.section_label(d, x, y, label, x1 - 44)
                 y += 28
                 for line in lines:
                     _text(d, (x, y - 3), line, font=body_f, fill=self.INK)
@@ -643,7 +643,7 @@ class Fantasy(Original):
         for label, lines in (("WHAT", what), ("WHAT TO DO", todo)):
             if lines:
                 y += 14 if label != "WHAT" else 0
-                self.label(d, x, y, label, x1 - 44)
+                self.section_label(d, x, y, label, x1 - 44)
                 y += 28
                 for line in lines:
                     _text(d, (x, y - 3), line, font=body_f, fill=self.INK)
