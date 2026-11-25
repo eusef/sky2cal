@@ -54,6 +54,24 @@ def _text(value, limit: int) -> str:
     return plain(str(value or ""), limit)
 
 
+def _unwrap(value) -> str:
+    """NWS texts come broken into lines of about 70 characters, with blank lines between
+    paragraphs and "* WHAT..." items: join the lines of each paragraph or item into one."""
+    out = []
+    for para in str(value or "").replace("\r\n", "\n").split("\n\n"):
+        lines = []
+        for line in para.split("\n"):
+            line = line.strip()
+            if not line:
+                continue
+            if lines and not line.startswith(("*", "-")):
+                lines[-1] += " " + line
+            else:
+                lines.append(line)
+        out += lines
+    return "\n".join(out)
+
+
 def parse(raw: dict, tz: ZoneInfo) -> list[Alert]:
     """api.weather.gov GeoJSON -> alerts, most serious first. Test and exercise messages and
     cancellations are left out. Raises on anything that is not an alert list."""
@@ -75,8 +93,8 @@ def parse(raw: dict, tz: ZoneInfo) -> list[Alert]:
             event=event,
             severity=severity if severity in SEVERITY else "Unknown",
             headline=_text(p.get("headline"), 300),
-            description=_text(p.get("description"), 2500),
-            instruction=_text(p.get("instruction"), 1200),
+            description=_text(_unwrap(p.get("description")), 2500),
+            instruction=_text(_unwrap(p.get("instruction")), 1200),
             area=_text(p.get("areaDesc"), 300),
             sender=_text(p.get("senderName"), 100),
             onset=_when(p.get("onset") or p.get("effective"), tz),
