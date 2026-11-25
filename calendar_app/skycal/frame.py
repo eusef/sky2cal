@@ -32,7 +32,7 @@ from PIL import Image, ImageChops
 from . import alerts as al
 from . import remote
 from . import weather as wx
-from .feed import Event, events_between, feed_key, read_feeds, read_feeds_apart
+from .feed import Event, events_between, feed_key, load_snapshot, read_feeds, read_feeds_apart
 from .render import (NAV, H, W, configure, fmt_time, render_alerts, render_day, render_detail, render_saver,
                      render_settings, render_weather, render_week, week_start)
 
@@ -215,7 +215,14 @@ def fetch_loop(feeds: list, cache: Path, refresh_s: int, tz: ZoneInfo, results: 
     per fetch, for a wide window of weeks; paging inside that window then only has to draw.
     The reading itself runs in a process of its own (see read_feeds_apart), and in this one
     only if that fails. Each entry is (ics, saved_at, events or None, window first day,
-    window last day)."""
+    window last day).
+
+    Before the first read it hands over the events the last read kept (load_snapshot), so
+    after a restart the week shows them within a second instead of after that read."""
+    kept = load_snapshot(feeds, cache, tz)
+    if kept is not None:
+        results.put(("feeds", (kept, time.time())))
+        os.write(wake_fd, b"x")
     while True:
         today = datetime.now(tz).date()
         first, last = today - timedelta(weeks=WINDOW_BACK_W), today + timedelta(weeks=WINDOW_AHEAD_W)

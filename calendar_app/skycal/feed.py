@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import html
+import json
 import pickle
 import re
 import subprocess
@@ -155,7 +156,69 @@ def read_feeds(urls: list, cache_dir: Path, first: date, last: date, tz: ZoneInf
         except Exception as err:
             print(f"feed {i} not usable: {type(err).__name__}", file=sys.stderr)
         data.append((ics, saved_at, events, first, last))
+    try:
+        save_snapshot(urls, cache_dir, data, tz)
+    except Exception as err:
+        print(f"events snapshot not saved: {type(err).__name__}", file=sys.stderr)
     return data
+
+
+SNAPSHOT = "events.json"
+
+
+def _snap_time(text: str, tz: ZoneInfo) -> datetime:
+    when = datetime.fromisoformat(text)
+    if when.tzinfo is None:
+        raise ValueError("naive time")
+    return when.astimezone(tz)
+
+
+def save_snapshot(urls: list, cache_dir: Path, data: list, tz: ZoneInfo) -> None:
+    """Keep the events just read, so a restarted calendar can show them at once instead of
+    reading every calendar again first (about 20 s on the frame for a large one, measured
+    2026-11-25). JSON, not pickle, so a file in the cache can never run code. Feeds are
+    keyed by feed_key(), the same short id the config uses, never by their secret address."""
+    feeds = {}
+    for url, (ics, saved_at, events, first, last) in zip(urls, data):
+        if ics is None or events is None:
+            continue
+        feeds[feed_key(url)] = {
+            "saved_at": saved_at.isoformat() if saved_at else None, "first": first.isoformat(), "last": last.isoformat(),
+            "events": [[e.start.isoformat(), e.end.isoformat(), e.all_day, e.title, e.location, e.description,
+                        e.color, e.cal_color] for e in events]}
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    path = cache_dir / SNAPSHOT
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps({"timezone": tz.key, "feeds": feeds}, ensure_ascii=False))
+    tmp.replace(path)
+
+
+def load_snapshot(urls: list, cache_dir: Path, tz: ZoneInfo) -> list | None:
+    """The entries save_snapshot() kept, in the order of `urls`, shaped as read_feeds() returns them.
+    Their ics is b"" (not None): gather() then uses the kept events inside their window, and
+    counts the feed as missing only outside it, until the real read arrives. A feed without
+    kept events gets an entry of Nones. None when nothing usable was kept."""
+    try:
+        kept = json.loads((Path(cache_dir) / SNAPSHOT).read_text())
+        if kept.get("timezone") != tz.key:          # all-day events are midnights in that zone
+            return None
+        data, found = [], False
+        for i, url in enumerate(urls):
+            entry = kept["feeds"].get(feed_key(url))
+            if not entry:
+                data.append((None, None, None, date.min, date.min))
+                continue
+            saved_at = _snap_time(entry["saved_at"], tz) if entry["saved_at"] else None
+            events = [Event(_snap_time(s, tz), _snap_time(e, tz), bool(a), str(t), i, str(w), str(n), str(c), str(cc))
+                      for s, e, a, t, w, n, c, cc in entry["events"]]
+            data.append((b"", saved_at, events, date.fromisoformat(entry["first"]), date.fromisoformat(entry["last"])))
+            found = True
+        return data if found else None
+    except FileNotFoundError:
+        return None
+    except Exception as err:
+        print(f"events snapshot not usable: {type(err).__name__}", file=sys.stderr)
+        return None
 
 
 def read_feeds_apart(urls: list, cache_dir: Path, first: date, last: date, tz: ZoneInfo, timeout: float = 600.0) -> list[tuple]:
