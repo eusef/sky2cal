@@ -12,6 +12,7 @@ The functions that take `hits` append the tappable areas they draw to it, as
 from __future__ import annotations
 
 import math
+import sys
 from collections import OrderedDict
 from datetime import date, datetime, time, timedelta
 from functools import lru_cache
@@ -330,9 +331,10 @@ def parse_color(text: str) -> tuple | None:
     if not text or len(text) > 40:
         return None
     try:
-        return tuple(ImageColor.getrgb(text)[:3])
-    except ValueError:
+        rgb = tuple(ImageColor.getrgb(text)[:3])
+    except (ValueError, OverflowError):
         return None
+    return rgb if all(isinstance(c, int) and 0 <= c <= 255 for c in rgb) else None
 
 
 _feed_colors: dict[int, tuple] = {}      # feed number -> colour chosen for that calendar in the config
@@ -372,6 +374,28 @@ def theme():
     return _theme
 
 
+def _draw(method: str, args: tuple, hits: list | None = None, paused: list | None = None) -> Image.Image:
+    """theme().<method>(*args). When a theme other than the original fails while drawing, the
+    original takes over for good (a theme must never keep the calendar from showing) and draws
+    the screen again; the tappable areas the failed theme had added are dropped first. What
+    `pause` raised (listed in `paused`) is passed on unchanged: it is not a failure."""
+    global _theme
+    drawer = theme()
+    kept = len(hits) if hits is not None else 0
+    try:
+        return getattr(drawer, method)(*args)
+    except Exception as err:
+        if paused or drawer.name == "original":
+            raise
+        print(f"theme {drawer.name!r} failed in {method}: {type(err).__name__}: {err}; using the original",
+              file=sys.stderr)
+        if hits is not None:
+            del hits[kept:]
+        from .themes.original import Original
+        _theme = Original()
+        return getattr(_theme, method)(*args)
+
+
 DAY_ROWS = 13     # rows of the day list; a longer day is shown in pages
 
 
@@ -384,12 +408,22 @@ def render_week(start: date, events: list[Event], now: datetime, note: str | Non
     the middle of the week (for a frame that has no calendars yet). `pause` is called after
     each day; what it raises ends the drawing (for a picture nobody is waiting for yet).
     `alerts` (active weather alerts) are shown in a band that leads to render_alerts()."""
-    return theme().render_week(start, events, now, note or "", stale, hits, weather, message, pause, list(alerts))
+    paused: list = []
+
+    def watched() -> None:
+        try:
+            pause()
+        except BaseException as err:
+            paused.append(err)
+            raise
+
+    return _draw("render_week", (start, events, now, note or "", stale, hits, weather, message, watched if pause else None,
+                                 list(alerts)), hits, paused)
 
 
 def render_detail(base: Image.Image, ev: Event, now: datetime) -> Image.Image:
     """One event's details on a card over `base`. A tap anywhere closes it."""
-    return theme().render_detail(base, ev, now)
+    return _draw("render_detail", (base, ev, now))
 
 
 def render_day(base: Image.Image, day: date, events: list[Event], now: datetime, hits: list | None = None,
@@ -397,22 +431,22 @@ def render_day(base: Image.Image, day: date, events: list[Event], now: datetime,
     """Every event of one day as a list on a card over `base` (the week view cuts long days short).
     A day with more than DAY_ROWS events is shown in pages, from event number `first`; its last
     row then leads to the next page (hit target: the number of that page's first event, an int)."""
-    return theme().render_day(base, day, events, now, hits, first)
+    return _draw("render_day", (base, day, events, now, hits, first), hits)
 
 
 def render_alerts(base: Image.Image, alerts: list, now: datetime, hits: list | None = None, index: int = 0) -> Image.Image:
     """Weather alert number `index` in full on a card over `base`. With more than one, a row
     leads to the next (hit target: its number, an int); a tap anywhere else closes the card."""
     index = index if 0 <= index < len(alerts) else 0
-    return theme().render_alerts(base, list(alerts), now, hits, index)
+    return _draw("render_alerts", (base, list(alerts), now, hits, index), hits)
 
 
 def render_weather(weather: Weather | None, now: datetime, message: str = "", alerts: list | tuple = ()) -> Image.Image:
     """Hour by hour for today and tomorrow. `message` is shown instead when there is no forecast."""
-    return theme().render_weather(weather, now, message, list(alerts))
+    return _draw("render_weather", (weather, now, message, list(alerts)))
 
 
 def render_saver(now: datetime, events: list[Event], weather: Weather | None, alerts: list | tuple = ()) -> Image.Image:
     """Dark screen with the time, the date, the weather and what comes next. The block moves a
     little every minute so that nothing stays lit in one place."""
-    return theme().render_saver(now, events, weather, list(alerts))
+    return _draw("render_saver", (now, events, weather, list(alerts)))

@@ -112,10 +112,6 @@ def fetch(lat: float, lon: float, tz: ZoneInfo, cache_dir: Path, timeout: float 
             raise ValueError("answer too large")
         raw = json.loads(body)
         alerts = parse(raw, tz)
-        tmp = saved.with_suffix(".tmp")
-        tmp.write_text(json.dumps({"point": point, "fetched": now.isoformat(), "raw": raw}))
-        tmp.replace(saved)
-        return alerts, True
     except Exception:
         try:
             old = json.loads(saved.read_text())
@@ -124,6 +120,13 @@ def fetch(lat: float, lon: float, tz: ZoneInfo, cache_dir: Path, timeout: float 
         except Exception:
             pass
         return None, False
+    try:                             # a copy on disk is only for when the next fetch fails
+        tmp = saved.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"point": point, "fetched": now.isoformat(), "raw": raw}))
+        tmp.replace(saved)
+    except OSError:
+        pass
+    return alerts, True
 
 
 def until(alert: Alert, now: datetime) -> str:

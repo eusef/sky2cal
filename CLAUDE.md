@@ -45,7 +45,7 @@ All run from the repository root on the Mac. `README.md` has the full sequence a
 | Debian root filesystem image | `bash port/rootfs/build-rootfs.sh ~/.ssh/skylight_frame.pub` |
 | Write the root filesystem (erases `user`) | `SKYLIGHT_HOST='fe80::xxxx%enN' python3 port/install_rootfs.py` |
 | Deploy or update the calendar | `bash calendar_app/deploy.sh '<frame address>'` |
-| Render a screen to PNG on the Mac | `cd calendar_app && .venv/bin/python -m skycal --config config.toml --png week.png [--screen week\|detail\|day\|weather\|saver]` |
+| Render a screen to PNG on the Mac | `cd calendar_app && .venv/bin/python -m skycal --config config.toml --png week.png [--screen week\|detail\|day\|alerts\|weather\|saver] [--theme NAME]` |
 
 There are no tests, linter config or CI. The build scripts check their own results and fail closed: on any error the output directory is left empty rather than stale.
 
@@ -61,7 +61,7 @@ There are no tests, linter config or CI. The build scripts check their own resul
 | `port/rootfs/` | Debian 13 armhf image: Dockerfile, overlay files, build script |
 | `port/install_rootfs.py`, `port/tn.py` | Write the image over the bring-up telnet shell; address from `SKYLIGHT_HOST` |
 | `port/update_kernel.py` | Check and write a boot image to `boot` or `recovery` over SSH on a frame running Debian |
-| `calendar_app/skycal/` | Calendar: `feed.py` (iCalendar fetch and cache; the display runs it in a child process so that reading a large calendar does not slow drawing), `weather.py` (Open-Meteo forecast, only when `weather_place` is set), `render.py` (week, event details, day list, weather, screensaver), `frame.py` (framebuffer, touch loop, screensaver and backlight), `__main__.py` (PNG output for development) |
+| `calendar_app/skycal/` | Calendar: `feed.py` (iCalendar fetch and cache; the display runs it in a child process so that reading a large calendar does not slow drawing), `weather.py` (Open-Meteo forecast, only when `weather_place` is set), `alerts.py` (NOAA alerts from api.weather.gov for the same place), `render.py` (shared drawing helpers, event colours, and the screens' entry points, which hand over to the theme), `themes/` (`original.py` is the base class and the original look; the other styles subclass it; `__init__.py` lists them), `fonts/` (OFL fonts of the themes), `frame.py` (framebuffer, touch loop, screensaver and backlight), `__main__.py` (PNG output for development) |
 | `calendar_app/skyadmin/` | Settings web page on the USB cable network only (`http://192.168.77.1`): `server.py` (pages, request checks, system commands), `settings.py` (config TOML and Wi-Fi network list, atomic writes); unit `calendar_app/skyadmin.service` |
 
 Not in git, and needed to build: `skylight_backup/`, `port/firmware/` (Wi-Fi firmware and nvram from the backup), `tools/rkdeveloptool/`. Also not in git: `recon/out/`. Never commit anything unpacked from the stock firmware.
