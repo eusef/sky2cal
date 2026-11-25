@@ -45,6 +45,9 @@ MESSAGES = {
     "dup_feed": (False, "That calendar is already in the list."),
     "too_many_feeds": (False, f"The list is full ({S.MAX_FEEDS} calendars). Remove one first."),
     "no_feed": (False, "That calendar was not found. It may already have been removed."),
+    "color_saved": (True, "Colour saved. The calendar is restarting."),
+    "bad_color": (False, "That colour was not accepted."),
+    "bad_theme": (False, "Choose one of the listed styles."),
     "bad_tz": (False, "That time zone was not recognised. Use a name such as America/Los_Angeles or Europe/London."),
     "bad_weekday": (False, "Choose a day for the week to start on."),
     "bad_refresh": (False, f"The update interval must be a whole number from {S.REFRESH_MIN} to {S.REFRESH_MAX} minutes."),
@@ -231,10 +234,23 @@ class App:
         b.append('<section id="calendar"><h2>Calendar</h2>')
         if feeds:
             b.append('<p class="hint">Calendars shown on the frame. Addresses are private, so only the start and end are shown.</p><ul>')
+            colors = cfg.get("feed_colors", {}) if isinstance(cfg.get("feed_colors", {}), dict) else {}
             for f in feeds:
-                b.append(f'<li><code>{escape(S.mask_feed(f))}</code><form method="post" action="/feed/remove">{h}'
-                         f'<input type="hidden" name="id" value="{S.feed_id(f)}"><button>Remove</button></form></li>')
+                fid = S.feed_id(f)
+                chosen = colors.get(fid) if isinstance(colors.get(fid), str) and S.valid_color(colors.get(fid)) else ""
+                state = "Colour on the frame" if chosen else "Colour: the style's own for this calendar"
+                reset = (f'<form method="post" action="/feed/color">{h}<input type="hidden" name="id" value="{fid}">'
+                         '<input type="hidden" name="color" value=""><button>Use the style\'s colour</button></form>' if chosen else "")
+                b.append(f'<li><code>{escape(S.mask_feed(f))}</code>'
+                         f'<form method="post" action="/feed/color">{h}<input type="hidden" name="id" value="{fid}">'
+                         f'<label class="c">{state} <input type="color" name="color" value="{chosen or "#006edc"}"></label>'
+                         f'<button>Set colour</button></form>{reset}'
+                         f'<form method="post" action="/feed/remove">{h}'
+                         f'<input type="hidden" name="id" value="{fid}"><button>Remove</button></form></li>')
             b.append("</ul>")
+            b.append('<p class="hint">An event that has a colour of its own in the calendar keeps it. Google Calendar does '
+                     'not put the colours you pick for single events into its iCalendar address, so those events show '
+                     'in their calendar\'s colour.</p>')
         else:
             b.append('<p class="hint">No calendars yet. Add one below.</p>')
         b.append(f'<form method="post" action="/feed/add" autocomplete="off">{h}'
@@ -271,7 +287,11 @@ class App:
 
         fx = " checked" if cfg.get("touch_flip_x", True) else ""
         fy = " checked" if cfg.get("touch_flip_y", True) else ""
+        current = cfg.get("theme", S.THEME_DEFAULT)
+        styles = "".join(f'<option value="{escape(n)}"{" selected" if n == current else ""}>{escape(lb)}</option>'
+                         for n, lb in S.THEMES)
         b.append(f'<section id="display"><h2>Display</h2><form method="post" action="/display/save">{h}'
+                 f'<label for="th">Style</label><select id="th" name="theme">{styles}</select>'
                  '<label for="ss">Show the screensaver after this many minutes without a touch</label>'
                  f'<input type="number" id="ss" name="screensaver_minutes" required min="0" max="{S.SAVER_MAX}" '
                  f'value="{escape(str(cfg.get("screensaver_minutes", S.SAVER_DEFAULT)))}">'
@@ -341,7 +361,35 @@ class App:
             if len(keep) == len(feeds):
                 return "no_feed"
             cfg["feeds"] = keep
+            colors = cfg.get("feed_colors")
+            if isinstance(colors, dict):
+                colors.pop(fid, None)
+                if not colors:
+                    del cfg["feed_colors"]
         return self._change_config(change, "feed_removed", "calendar")
+
+    def act_feed_color(self, form) -> tuple[str, str]:
+        fid, color = form("id"), form("color").strip().lower()
+
+        def change(cfg):
+            feeds = cfg.get("feeds", [])
+            if not isinstance(feeds, list) or not any(
+                    isinstance(f, str) and hmac.compare_digest(S.feed_id(f).encode(), fid.encode()) for f in feeds):
+                return "no_feed"
+            if color and not S.valid_color(color):
+                return "bad_color"
+            colors = cfg.get("feed_colors", {})
+            if not isinstance(colors, dict):
+                colors = {}
+            if color:
+                colors[fid] = color
+            else:
+                colors.pop(fid, None)
+            if colors:
+                cfg["feed_colors"] = colors
+            else:
+                cfg.pop("feed_colors", None)
+        return self._change_config(change, "color_saved", "calendar")
 
     def act_calendar_save(self, form) -> tuple[str, str]:
         tz, wd, rm = form("timezone").strip(), form("first_weekday"), form("refresh_minutes").strip()
@@ -368,13 +416,15 @@ class App:
         return self._change_config(change, "saved", "weather")
 
     def act_display_save(self, form) -> tuple[str, str]:
-        ss = form("screensaver_minutes").strip()
+        ss, theme = form("screensaver_minutes").strip(), form("theme")
 
         def change(cfg):
             if not re.fullmatch(r"[0-9]{1,4}", ss) or int(ss) > S.SAVER_MAX:
                 return "bad_saver"
+            if not S.valid_theme(theme):
+                return "bad_theme"
             cfg.update(touch_flip_x=form("touch_flip_x") == "1", touch_flip_y=form("touch_flip_y") == "1",
-                       screensaver_minutes=int(ss))
+                       screensaver_minutes=int(ss), theme=theme)
         return self._change_config(change, "saved", "display")
 
     def act_wifi_scan(self, form) -> tuple[str, str]:
@@ -416,7 +466,7 @@ class App:
         return "rebooting", ""
 
     POSTS = {"/wifi/scan": act_wifi_scan, "/wifi/join": act_wifi_join, "/feed/add": act_feed_add,
-             "/feed/remove": act_feed_remove, "/calendar/save": act_calendar_save,
+             "/feed/remove": act_feed_remove, "/feed/color": act_feed_color, "/calendar/save": act_calendar_save,
              "/weather/save": act_weather_save, "/display/save": act_display_save, "/do/restart": act_restart, "/do/reboot": act_reboot}
 
 

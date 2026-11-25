@@ -12,7 +12,7 @@ KEY=$HOME/.ssh/skylight_frame
 SSH=(ssh -i "$KEY" -o IdentitiesOnly=yes -o BatchMode=yes "root@$HOST")
 
 SYSFILES=../port/rootfs/files
-python3 -m py_compile skycal/*.py skyadmin/*.py
+python3 -m py_compile skycal/*.py skycal/themes/*.py skyadmin/*.py
 tar -c --exclude __pycache__ skycal skyadmin skycal.service skyadmin.service config.example.toml \
     -C "$SYSFILES" etc/nftables.conf etc/systemd/network/10-usb0.network \
     usr/local/sbin/skylight-usb-drive etc/systemd/system/skylight-usb-drive.service | "${SSH[@]}" '
@@ -25,8 +25,10 @@ tar -c --exclude __pycache__ skycal skyadmin skycal.service skyadmin.service con
     id skycal >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin skycal
     [ -e /etc/skycal/config.toml ] || install -m 600 "$new/config.example.toml" /etc/skycal/config.toml
     install -m 644 "$new/skycal.service" /etc/systemd/system/skycal.service
-    mkdir -p /opt/skycal/skycal
+    mkdir -p /opt/skycal/skycal/themes /opt/skycal/skycal/fonts
     install -m 644 "$new"/skycal/*.py /opt/skycal/skycal/
+    install -m 644 "$new"/skycal/themes/*.py /opt/skycal/skycal/themes/
+    install -m 644 "$new"/skycal/fonts/* /opt/skycal/skycal/fonts/
     install -m 644 "$new/skyadmin.service" /etc/systemd/system/skyadmin.service
     mkdir -p /opt/skycal/skyadmin
     install -m 644 "$new"/skyadmin/*.py /opt/skycal/skyadmin/

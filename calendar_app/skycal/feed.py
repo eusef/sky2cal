@@ -1,7 +1,7 @@
 """Fetch iCalendar feeds and expand them into per-day events.
 
-Only outbound HTTPS GETs to the configured feed URLs are made here (weather.py makes the
-frame's only other requests).
+Only outbound HTTPS GETs to the configured feed URLs are made here (weather.py and alerts.py
+make the frame's only other requests).
 A failed fetch falls back to the last good copy on disk.
 """
 from __future__ import annotations
@@ -27,6 +27,7 @@ _BREAK = re.compile(r"<(?:br|/p|/div|/li)\s*/?>", re.I)    # one \s* only: two i
 _TAG = re.compile(r"</?(?:a|b|i|u|p|br|div|span|ul|ol|li|html|body|head|strong|em|h[1-6]|font|table|tbody|tr|td|th|"
                   r"blockquote|pre|code|hr|img|small|sub|sup|s)\b[^<>]{0,2000}>", re.I)
 MAX_TITLE = 300
+MAX_COLOR = 40                       # characters of a COLOR value that are kept; render.py checks the rest
 
 
 def plain(text: str, limit: int = MAX_NOTES) -> str:
@@ -50,6 +51,21 @@ class Event:
     cal: int  # index of the feed it came from
     location: str = ""
     description: str = ""  # plain text, at most MAX_NOTES characters
+    color: str = ""        # the event's own COLOR (RFC 7986: a CSS colour name or #rrggbb), as written
+    cal_color: str = ""    # the colour the feed gives its whole calendar (COLOR or X-APPLE-CALENDAR-COLOR)
+
+
+def feed_key(url: str) -> str:
+    """Short id of a feed address, the same as skyadmin.settings.feed_id(). The config keeps
+    per-calendar colours under it (feed_colors), so the secret address is not repeated there."""
+    return hashlib.sha256(url.encode("utf-8", "replace")).hexdigest()[:16]
+
+
+def _color(prop) -> str:
+    """A COLOR-like property value as a short plain string ("" if absent)."""
+    if isinstance(prop, list):
+        prop = prop[0] if prop else ""
+    return str(prop or "").strip()[:MAX_COLOR]
 
 
 class _HttpsOnlyRedirects(urllib.request.HTTPRedirectHandler):
@@ -95,6 +111,7 @@ def fetch(url: str, cache_dir: Path, timeout: float = 20.0) -> tuple[bytes | Non
 def events_between(ics: bytes, first: date, last: date, tz: ZoneInfo, cal: int = 0) -> list[Event]:
     """Events (recurrences expanded) overlapping the local days first..last inclusive."""
     calendar = icalendar.Calendar.from_ical(ics)
+    cal_color = _color(calendar.get("COLOR")) or _color(calendar.get("X-APPLE-CALENDAR-COLOR"))
     lo = datetime.combine(first, time.min, tz)
     hi = datetime.combine(last + timedelta(days=1), time.min, tz)
     out = []
@@ -109,16 +126,17 @@ def events_between(ics: bytes, first: date, last: date, tz: ZoneInfo, cal: int =
         where, notes = comp.get("LOCATION", ""), comp.get("DESCRIPTION", "")
         where = plain(str(where[0] if isinstance(where, list) and where else where), 300)   # a repeated property
         notes = plain(str(notes[0] if isinstance(notes, list) and notes else notes))        # comes as a list
+        tint = _color(comp.get("COLOR"))
         if not isinstance(start, datetime):  # all-day: plain dates, in the viewer's zone
             end = end_prop.dt if end_prop is not None else start + timedelta(days=1)
             if end <= start:
                 end = start + timedelta(days=1)
-            ev = Event(datetime.combine(start, time.min, tz), datetime.combine(end, time.min, tz), True, title, cal, where, notes)
+            ev = Event(datetime.combine(start, time.min, tz), datetime.combine(end, time.min, tz), True, title, cal, where, notes, tint, cal_color)
         else:
             end = end_prop.dt if end_prop is not None else start
             if start.tzinfo is None:  # floating time: same wall clock everywhere
                 start, end = start.replace(tzinfo=tz), end.replace(tzinfo=tz)
-            ev = Event(start.astimezone(tz), end.astimezone(tz), False, title, cal, where, notes)
+            ev = Event(start.astimezone(tz), end.astimezone(tz), False, title, cal, where, notes, tint, cal_color)
         if ev.start < hi and (ev.end > lo or ev.start >= lo):
             out.append(ev)
     return out
