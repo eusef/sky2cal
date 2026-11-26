@@ -11,6 +11,8 @@ import os
 import sys
 from pathlib import Path
 
+from ..smallfile import read_capped
+
 # name -> (label on the settings page, module, class, label on the frame's own style buttons)
 THEMES = {
     "original": ("Original", "original", "Original", "Original"),
@@ -22,6 +24,7 @@ THEMES = {
 }
 DEFAULT = "original"
 CHOICE_FILE = "theme-choice"     # in the calendar's state folder (/var/lib/skycal on the frame)
+CHOICE_MAX_BYTES = 4096
 
 
 def labels() -> list[tuple[str, str]]:
@@ -42,10 +45,12 @@ def chosen(state_dir: Path, configured: str) -> str:
     configured = str(configured or DEFAULT)
     path = Path(state_dir) / CHOICE_FILE
     try:
-        saved = json.loads(path.read_text())
+        saved = json.loads(read_capped(path, CHOICE_MAX_BYTES)[0])    # never hangs or fills the memory
         name, over = saved["theme"], saved["over"]
-    except (OSError, ValueError, KeyError, TypeError):
+    except FileNotFoundError:
         return configured
+    except (OSError, ValueError, KeyError, TypeError, RecursionError):
+        name, over = None, None       # unusable: dropped below
     if isinstance(name, str) and name in THEMES and over == configured:
         return name
     try:

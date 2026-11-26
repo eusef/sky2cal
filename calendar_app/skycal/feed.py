@@ -9,10 +9,8 @@ from __future__ import annotations
 import hashlib
 import html
 import json
-import os
 import pickle
 import re
-import stat
 import subprocess
 import sys
 import urllib.request
@@ -24,6 +22,8 @@ from zoneinfo import ZoneInfo
 
 import icalendar
 import recurring_ical_events
+
+from .smallfile import read_capped
 
 MAX_FEED_BYTES = 20 * 1024 * 1024
 MAX_NOTES = 1200
@@ -201,24 +201,6 @@ def save_snapshot(urls: list, cache_dir: Path, data: list, tz: ZoneInfo) -> None
     tmp.replace(path)
 
 
-def _read_snapshot(path: Path) -> tuple[bytes, float]:
-    """(the snapshot's bytes, when it was written). Only a regular file, opened without following
-    a link (O_NOFOLLOW) and without waiting for a writer (O_NONBLOCK, for a FIFO), and at most
-    SNAPSHOT_MAX_BYTES of it: /dev/zero or a FIFO in its place must not hang the calendar or
-    use up its memory. Raises FileNotFoundError when there is none, OSError or ValueError else."""
-    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-    with os.fdopen(fd, "rb") as f:
-        info = os.fstat(f.fileno())
-        if not stat.S_ISREG(info.st_mode):
-            raise ValueError("snapshot is not a regular file")
-        if info.st_size > SNAPSHOT_MAX_BYTES:
-            raise ValueError("snapshot too large")
-        data = f.read(SNAPSHOT_MAX_BYTES + 1)       # the size can grow after the check
-    if len(data) > SNAPSHOT_MAX_BYTES:
-        raise ValueError("snapshot too large")
-    return data, info.st_mtime
-
-
 def _snap_event(row: list, i: int, lo: datetime, hi: datetime, tz: ZoneInfo) -> Event | None:
     """One kept event, held to the same limits events_between() applies, since the file could
     have been changed; None when it lies outside its window."""
@@ -242,9 +224,9 @@ def load_snapshot(urls: list, cache_dir: Path, tz: ZoneInfo, max_age: float) -> 
     A snapshot older than `max_age` seconds (longer than a running calendar ever goes between
     two writes of it) gives feeds that were fresh when it was saved its own time as saved_at,
     so the week shows them as saved data, not as current. The file is read only within limits
-    (_read_snapshot), so a planted one cannot hang the calendar or use up its memory."""
+    (read_capped), so a planted one cannot hang the calendar or use up its memory."""
     try:
-        raw, written = _read_snapshot(Path(cache_dir) / SNAPSHOT)
+        raw, written = read_capped(Path(cache_dir) / SNAPSHOT, SNAPSHOT_MAX_BYTES)
         kept = json.loads(raw)
         if kept.get("timezone") != tz.key:          # all-day events are midnights in that zone
             return None
