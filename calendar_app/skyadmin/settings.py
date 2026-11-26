@@ -13,14 +13,20 @@ from pathlib import Path
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
+from skycal.themes import DEFAULT as THEME_DEFAULT  # noqa: F401  (server.py uses it)
+from skycal.themes import labels as _theme_labels
+
 KNOWN_KEYS = ("timezone", "first_weekday", "cache_dir", "feeds", "refresh_minutes",
-              "touch_flip_x", "touch_flip_y", "weather_place", "weather_units", "screensaver_minutes")
+              "touch_flip_x", "touch_flip_y", "weather_place", "weather_units", "screensaver_minutes", "theme",
+              "feed_colors")
 WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 REFRESH_MIN, REFRESH_MAX = 5, 1440
 MAX_FEEDS = 20
 MAX_FEED_LEN = 2000
 MAX_PLACE_LEN = 80
 WEATHER_UNITS = ("fahrenheit", "celsius")
+THEMES = tuple(_theme_labels())         # (name, label) of each look the calendar can be drawn in
+_COLOR = re.compile(r"#[0-9a-fA-F]{6}")
 SAVER_DEFAULT, SAVER_MAX = 10, 720     # minutes; the default matches skycal.frame.SAVER_DEFAULT_MIN
 
 
@@ -159,6 +165,15 @@ def valid_feed(url: str) -> bool:
         return bool(urlsplit(url).hostname)
     except ValueError:
         return False
+
+
+def valid_color(text: str) -> bool:
+    """#rrggbb, as an <input type="color"> sends it."""
+    return bool(_COLOR.fullmatch(text))
+
+
+def valid_theme(name: str) -> bool:
+    return name in dict(THEMES)
 
 
 def valid_timezone(name: str) -> bool:

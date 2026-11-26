@@ -1,13 +1,14 @@
 """Fetch iCalendar feeds and expand them into per-day events.
 
-Only outbound HTTPS GETs to the configured feed URLs are made here (weather.py makes the
-frame's only other requests).
+Only outbound HTTPS GETs to the configured feed URLs are made here (weather.py and alerts.py
+make the frame's only other requests).
 A failed fetch falls back to the last good copy on disk.
 """
 from __future__ import annotations
 
 import hashlib
 import html
+import json
 import pickle
 import re
 import subprocess
@@ -27,6 +28,7 @@ _BREAK = re.compile(r"<(?:br|/p|/div|/li)\s*/?>", re.I)    # one \s* only: two i
 _TAG = re.compile(r"</?(?:a|b|i|u|p|br|div|span|ul|ol|li|html|body|head|strong|em|h[1-6]|font|table|tbody|tr|td|th|"
                   r"blockquote|pre|code|hr|img|small|sub|sup|s)\b[^<>]{0,2000}>", re.I)
 MAX_TITLE = 300
+MAX_COLOR = 40                       # characters of a COLOR value that are kept; render.py checks the rest
 
 
 def plain(text: str, limit: int = MAX_NOTES) -> str:
@@ -50,6 +52,21 @@ class Event:
     cal: int  # index of the feed it came from
     location: str = ""
     description: str = ""  # plain text, at most MAX_NOTES characters
+    color: str = ""        # the event's own COLOR (RFC 7986: a CSS colour name or #rrggbb), as written
+    cal_color: str = ""    # the colour the feed gives its whole calendar (COLOR or X-APPLE-CALENDAR-COLOR)
+
+
+def feed_key(url: str) -> str:
+    """Short id of a feed address, the same as skyadmin.settings.feed_id(). The config keeps
+    per-calendar colours under it (feed_colors), so the secret address is not repeated there."""
+    return hashlib.sha256(url.encode("utf-8", "replace")).hexdigest()[:16]
+
+
+def _color(prop) -> str:
+    """A COLOR-like property value as a short plain string ("" if absent)."""
+    if isinstance(prop, list):
+        prop = prop[0] if prop else ""
+    return str(prop or "").strip()[:MAX_COLOR]
 
 
 class _HttpsOnlyRedirects(urllib.request.HTTPRedirectHandler):
@@ -95,6 +112,7 @@ def fetch(url: str, cache_dir: Path, timeout: float = 20.0) -> tuple[bytes | Non
 def events_between(ics: bytes, first: date, last: date, tz: ZoneInfo, cal: int = 0) -> list[Event]:
     """Events (recurrences expanded) overlapping the local days first..last inclusive."""
     calendar = icalendar.Calendar.from_ical(ics)
+    cal_color = _color(calendar.get("COLOR")) or _color(calendar.get("X-APPLE-CALENDAR-COLOR"))
     lo = datetime.combine(first, time.min, tz)
     hi = datetime.combine(last + timedelta(days=1), time.min, tz)
     out = []
@@ -109,16 +127,17 @@ def events_between(ics: bytes, first: date, last: date, tz: ZoneInfo, cal: int =
         where, notes = comp.get("LOCATION", ""), comp.get("DESCRIPTION", "")
         where = plain(str(where[0] if isinstance(where, list) and where else where), 300)   # a repeated property
         notes = plain(str(notes[0] if isinstance(notes, list) and notes else notes))        # comes as a list
+        tint = _color(comp.get("COLOR"))
         if not isinstance(start, datetime):  # all-day: plain dates, in the viewer's zone
             end = end_prop.dt if end_prop is not None else start + timedelta(days=1)
             if end <= start:
                 end = start + timedelta(days=1)
-            ev = Event(datetime.combine(start, time.min, tz), datetime.combine(end, time.min, tz), True, title, cal, where, notes)
+            ev = Event(datetime.combine(start, time.min, tz), datetime.combine(end, time.min, tz), True, title, cal, where, notes, tint, cal_color)
         else:
             end = end_prop.dt if end_prop is not None else start
             if start.tzinfo is None:  # floating time: same wall clock everywhere
                 start, end = start.replace(tzinfo=tz), end.replace(tzinfo=tz)
-            ev = Event(start.astimezone(tz), end.astimezone(tz), False, title, cal, where, notes)
+            ev = Event(start.astimezone(tz), end.astimezone(tz), False, title, cal, where, notes, tint, cal_color)
         if ev.start < hi and (ev.end > lo or ev.start >= lo):
             out.append(ev)
     return out
@@ -137,7 +156,69 @@ def read_feeds(urls: list, cache_dir: Path, first: date, last: date, tz: ZoneInf
         except Exception as err:
             print(f"feed {i} not usable: {type(err).__name__}", file=sys.stderr)
         data.append((ics, saved_at, events, first, last))
+    try:
+        save_snapshot(urls, cache_dir, data, tz)
+    except Exception as err:
+        print(f"events snapshot not saved: {type(err).__name__}", file=sys.stderr)
     return data
+
+
+SNAPSHOT = "events.json"
+
+
+def _snap_time(text: str, tz: ZoneInfo) -> datetime:
+    when = datetime.fromisoformat(text)
+    if when.tzinfo is None:
+        raise ValueError("naive time")
+    return when.astimezone(tz)
+
+
+def save_snapshot(urls: list, cache_dir: Path, data: list, tz: ZoneInfo) -> None:
+    """Keep the events just read, so a restarted calendar can show them at once instead of
+    reading every calendar again first (about 20 s on the frame for a large one, measured
+    2026-11-25). JSON, not pickle, so a file in the cache can never run code. Feeds are
+    keyed by feed_key(), the same short id the config uses, never by their secret address."""
+    feeds = {}
+    for url, (ics, saved_at, events, first, last) in zip(urls, data):
+        if ics is None or events is None:
+            continue
+        feeds[feed_key(url)] = {
+            "saved_at": saved_at.isoformat() if saved_at else None, "first": first.isoformat(), "last": last.isoformat(),
+            "events": [[e.start.isoformat(), e.end.isoformat(), e.all_day, e.title, e.location, e.description,
+                        e.color, e.cal_color] for e in events]}
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    path = cache_dir / SNAPSHOT
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps({"timezone": tz.key, "feeds": feeds}, ensure_ascii=False))
+    tmp.replace(path)
+
+
+def load_snapshot(urls: list, cache_dir: Path, tz: ZoneInfo) -> list | None:
+    """The entries save_snapshot() kept, in the order of `urls`, shaped as read_feeds() returns them.
+    Their ics is b"" (not None): gather() then uses the kept events inside their window, and
+    counts the feed as missing only outside it, until the real read arrives. A feed without
+    kept events gets an entry of Nones. None when nothing usable was kept."""
+    try:
+        kept = json.loads((Path(cache_dir) / SNAPSHOT).read_text())
+        if kept.get("timezone") != tz.key:          # all-day events are midnights in that zone
+            return None
+        data, found = [], False
+        for i, url in enumerate(urls):
+            entry = kept["feeds"].get(feed_key(url))
+            if not entry:
+                data.append((None, None, None, date.min, date.min))
+                continue
+            saved_at = _snap_time(entry["saved_at"], tz) if entry["saved_at"] else None
+            events = [Event(_snap_time(s, tz), _snap_time(e, tz), bool(a), str(t), i, str(w), str(n), str(c), str(cc))
+                      for s, e, a, t, w, n, c, cc in entry["events"]]
+            data.append((b"", saved_at, events, date.fromisoformat(entry["first"]), date.fromisoformat(entry["last"])))
+            found = True
+        return data if found else None
+    except FileNotFoundError:
+        return None
+    except Exception as err:
+        print(f"events snapshot not usable: {type(err).__name__}", file=sys.stderr)
+        return None
 
 
 def read_feeds_apart(urls: list, cache_dir: Path, first: date, last: date, tz: ZoneInfo, timeout: float = 600.0) -> list[tuple]:

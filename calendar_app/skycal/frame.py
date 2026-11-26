@@ -6,9 +6,10 @@ The panel is 800x1280 portrait, RGB565; the frame is mounted landscape with the 
 top edge on the right, so the 1280x800 picture is turned a quarter turn before it is written.
 
 Screens: the week (tap an event for its details, a day's heading or "+N more" for the whole
-day, the weather button for the hourly forecast; swipe sideways to change week), and a
-screensaver that takes over after a while without a touch and dims the backlight. Any touch
-ends the screensaver. SIGUSR1 starts it at once (for testing).
+day, the weather button for the hourly forecast, the alert band for the weather alerts, the
+gear for a QR code that opens the settings page on a phone (remote.py); swipe sideways to change week), and a screensaver that takes over after a while without a
+touch and dims the backlight. Any touch ends the screensaver. SIGUSR1 starts it at once (for
+testing). How the screens look is the theme named in the config (`theme`).
 """
 from __future__ import annotations
 
@@ -28,10 +29,12 @@ from zoneinfo import ZoneInfo
 
 from PIL import Image, ImageChops
 
+from . import alerts as al
+from . import remote
 from . import weather as wx
-from .feed import Event, events_between, read_feeds, read_feeds_apart
-from .render import (NAV, H, W, fmt_time, render_day, render_detail, render_saver, render_weather, render_week,
-                     week_start)
+from .feed import Event, events_between, feed_key, load_snapshot, read_feeds, read_feeds_apart
+from .render import (NAV, H, W, configure, fmt_time, render_alerts, render_day, render_detail, render_saver,
+                     render_settings, render_weather, render_week, week_start)
 
 FB_W, FB_H = H, W            # 800 x 1280
 TAP_MARGIN = 24              # px of slack around each button
@@ -39,8 +42,10 @@ TAP_SLOP = 40                # a finger that moved less than this (px) made a ta
 SWIPE_MIN = 120              # a finger that moved at least this far sideways (px) made a swipe
 IDLE_BACK_S = 300            # return to the current week after this long without a touch
 CARD_BACK_S = 120            # close details, a day list or the weather after this long without a touch
+SETTINGS_BACK_S = 300        # close the settings QR code (and withdraw it) after this long without a touch
 RETRY_S = 60                 # fetch again this soon when a feed was not fresh
 WEATHER_S = 30 * 60          # how often the forecast is fetched again
+ALERTS_S = 5 * 60            # how often the weather alerts are fetched again
 WINDOW_BACK_W, WINDOW_AHEAD_W = 26, 78   # weeks around today that are read ahead of time
 TICK_S = 15                  # longest sleep of the display loop
 SAVER_DEFAULT_MIN = 10       # minutes without a touch before the screensaver; 0 in the config turns it off
@@ -148,7 +153,7 @@ def button_at(x: int, y: int) -> str | None:
 
 def target_at(hits: list, x: int, y: int):
     """What was drawn under a tap: an Event, a date (that whole day), an int (a page of the day
-    list) or None. Events win over the day behind them."""
+    list, or an alert), "alerts" (the alert band) or None. Events win over the day behind them."""
     found = [t for x0, y0, x1, y1, t in hits if x0 <= x <= x1 and y0 <= y <= y1]
     return next((t for t in found if isinstance(t, Event)), found[0] if found else None)
 
@@ -210,7 +215,14 @@ def fetch_loop(feeds: list, cache: Path, refresh_s: int, tz: ZoneInfo, results: 
     per fetch, for a wide window of weeks; paging inside that window then only has to draw.
     The reading itself runs in a process of its own (see read_feeds_apart), and in this one
     only if that fails. Each entry is (ics, saved_at, events or None, window first day,
-    window last day)."""
+    window last day).
+
+    Before the first read it hands over the events the last read kept (load_snapshot), so
+    after a restart the week shows them within a second instead of after that read."""
+    kept = load_snapshot(feeds, cache, tz)
+    if kept is not None:
+        results.put(("feeds", (kept, time.time())))
+        os.write(wake_fd, b"x")
     while True:
         today = datetime.now(tz).date()
         first, last = today - timedelta(weeks=WINDOW_BACK_W), today + timedelta(weeks=WINDOW_AHEAD_W)
@@ -239,6 +251,33 @@ def weather_loop(place: str, units: str, cache: Path, tz: ZoneInfo, results: que
         os.write(wake_fd, b"x")
         failures = 0 if fresh else failures + 1
         time.sleep(WEATHER_S if fresh else min(3600, RETRY_S * 2 ** (failures - 1)))
+
+
+def alerts_loop(place: str, cache: Path, tz: ZoneInfo, results: queue.SimpleQueue, wake_fd: int) -> None:
+    """Background thread: fetch the weather alerts for the place's coordinates, hand them to the
+    display loop, repeat. After a failure it waits as weather_loop() does. Outside the United
+    States every fetch fails and nothing is ever shown."""
+    failures = 0
+    while True:
+        found, fresh = None, False
+        try:
+            lat, lon, _ = wx.locate(place, cache)
+            found, fresh = al.fetch(lat, lon, tz, cache)
+        except Exception as err:
+            print(f"weather alerts not usable: {type(err).__name__}", file=sys.stderr)
+        results.put(("alerts", found or []))
+        os.write(wake_fd, b"x")
+        failures = 0 if fresh else failures + 1
+        time.sleep(ALERTS_S if fresh else min(3600, RETRY_S * 2 ** (failures - 1)))
+
+
+def feed_colors(cfg: dict) -> dict:
+    """{feed number: colour} from the config's feed_colors table, which is keyed by feed_key()."""
+    chosen = cfg.get("feed_colors", {})
+    if not isinstance(chosen, dict):
+        return {}
+    return {i: chosen[feed_key(url)] for i, url in enumerate(cfg.get("feeds", []))
+            if isinstance(url, str) and isinstance(chosen.get(feed_key(url)), str)}
 
 
 def gather(data: list, tz: ZoneInfo, first: date, last: date) -> tuple[list, datetime | None, int]:
@@ -311,13 +350,14 @@ class Weeks:
 
 
 def compose(cfg: dict, tz: ZoneInfo, data: list, fetched_at: float | None, offset: int, now: datetime | None = None,
-            hits: list | None = None, forecast=None, pause=None) -> tuple[Image.Image, list]:
+            hits: list | None = None, forecast=None, pause=None, alerts: list | None = None) -> tuple[Image.Image, list]:
     """(picture of the week `offset` weeks from this one, the events it was drawn from).
-    `pause` goes to render_week()."""
+    `pause` goes to render_week(); `alerts` are the active weather alerts."""
     now = now or datetime.now(tz)
+    alerts = alerts or []
     start = week_start(now.date(), cfg.get("first_weekday", 6)) + timedelta(weeks=offset)
     if fetched_at is None:
-        return render_week(start, [], now, "Starting", hits=hits, weather=forecast), []
+        return render_week(start, [], now, "Starting", hits=hits, weather=forecast, alerts=alerts), []
     events, oldest, missing = gather(data, tz, start, start + timedelta(days=6))
     note, stale = "", True
     if missing:
@@ -329,7 +369,7 @@ def compose(cfg: dict, tz: ZoneInfo, data: list, fetched_at: float | None, offse
     if not data:
         message = ("No calendars yet. Connect the frame to a computer with its USB cable, open the drive "
                    "named FRAME and follow the link to the settings page.")
-    return render_week(start, events, now, note, stale, hits, forecast, message, pause), events
+    return render_week(start, events, now, note, stale, hits, forecast, message, pause, alerts), events
 
 
 def main() -> None:
@@ -342,6 +382,8 @@ def main() -> None:
     cfg = tomllib.loads(args.config.read_text())
     tz = ZoneInfo(cfg["timezone"])
     cache = args.cache_dir or Path(cfg.get("cache_dir", "cache"))
+    remote.drop_code(cache)          # one left behind by a calendar that stopped with the card open
+    print(f"theme: {configure(str(cfg.get('theme', 'original')), feed_colors(cfg))}", file=sys.stderr)
     refresh_s = max(1, int(cfg.get("refresh_minutes", 10))) * 60
     # Measured on the frame (2026-11-11): the touch panel is turned half a turn against the
     # framebuffer, so both axes are flipped unless the config says otherwise.
@@ -352,6 +394,7 @@ def main() -> None:
     data: list = []
     fetched_at = None
     forecast = None
+    warnings_now: list = []      # weather alerts as last fetched; al.active() picks those still running
 
     # First picture before any network use, so a framebuffer problem stops the service at once.
     show(compose(cfg, tz, data, fetched_at, 0)[0], args.fb)
@@ -366,6 +409,7 @@ def main() -> None:
     if place:
         threading.Thread(target=weather_loop, args=(place, str(cfg.get("weather_units", "fahrenheit")), cache, tz,
                                                     results, wake_w), daemon=True).start()
+        threading.Thread(target=alerts_loop, args=(place, cache, tz, results, wake_w), daemon=True).start()
 
     asked = {"saver": False}
 
@@ -384,15 +428,17 @@ def main() -> None:
 
     touch = open_touch()
     pos: dict = {}
-    # view: "week", "detail" (one event), "day" (one day's list), "weather" or "saver"
+    # view: "week", "detail" (one event), "day" (one day's list), "alerts", "weather", "settings" or "saver"
     view, chosen, chosen_day, day_first, back_to = "week", None, None, 0, "week"
+    settings_url, settings_note = None, ""     # what the settings card shows while view == "settings"
+    alert_index = 0
     offset, last_touch, drawn_minute, dirty = 0, time.monotonic(), None, True
     hits: list = []
     stamp, ahead_failed = 0, None      # arrivals of new data so far; the `stamp` at which drawing ahead failed
 
     def draw_week(which: int, now: datetime, pause) -> tuple:
         found: list = []
-        img, events = compose(cfg, tz, data, fetched_at, which, now, found, forecast, pause)
+        img, events = compose(cfg, tz, data, fetched_at, which, now, found, forecast, pause, al.active(warnings_now, now))
         return img, found, events
 
     def touched() -> None:
@@ -409,6 +455,8 @@ def main() -> None:
                 kind, value = results.get()
                 if kind == "feeds":
                     data, fetched_at = value
+                elif kind == "alerts":
+                    warnings_now = value
                 else:
                     forecast = value
                 stamp += 1
@@ -418,13 +466,18 @@ def main() -> None:
                 if view != "saver":
                     view, offset, dirty = "saver", 0, True
                     backlight.dim()
-            if view in ("detail", "day", "weather") and idle > CARD_BACK_S:
+            if view in ("detail", "day", "weather", "alerts") and idle > CARD_BACK_S:
+                view, dirty = "week", True
+            if view == "settings" and idle > min(SETTINGS_BACK_S, remote.CODE_S):
                 view, dirty = "week", True
             if offset and idle > IDLE_BACK_S:
                 offset, dirty = 0, True
             if saver_s and touch and view != "saver" and idle > saver_s:    # never without a way back
                 view, offset, dirty = "saver", 0, True
                 backlight.dim()
+            if view != "settings" and settings_url:    # the card has closed: its code stops working
+                remote.drop_code(cache)
+                settings_url = None
             now = datetime.now(tz)
             minute = int(now.timestamp() // 60)   # counted from 1970, so the hour that comes twice in autumn is two
             if minute != drawn_minute:           # the clock, "now" marks and today's highlight
@@ -432,12 +485,15 @@ def main() -> None:
             if dirty:
                 try:
                     hits = []
+                    running = al.active(warnings_now, now)
+                    if view == "alerts" and not running:     # the last one ended while it was open
+                        view = "week"
                     if view == "saver":
                         events = gather(data, tz, now.date(), now.date() + timedelta(days=1))[0] if fetched_at else []
-                        img = render_saver(now, events, forecast)
+                        img = render_saver(now, events, forecast, running)
                     elif view == "weather":
                         message = "" if place else "Type your town on the settings page to see the weather here."
-                        img = render_weather(forecast, now, message or "The forecast has not arrived yet.")
+                        img = render_weather(forecast, now, message or "The forecast has not arrived yet.", running)
                     else:
                         img, week_hits, events = weeks.get(offset, (minute, stamp), now, offset)
                         if view == "detail" and chosen is not None:
@@ -446,6 +502,11 @@ def main() -> None:
                             img = render_detail(img, chosen, now)
                         elif view == "day" and chosen_day is not None:
                             img = render_day(img, chosen_day, events, now, hits, day_first)
+                        elif view == "alerts":
+                            alert_index = alert_index if alert_index < len(running) else 0
+                            img = render_alerts(img, running, now, hits, alert_index)
+                        elif view == "settings":
+                            img = render_settings(img, settings_url, now, settings_note)
                         else:
                             view, hits = "week", week_hits
                     show(img, args.fb)
@@ -498,7 +559,7 @@ def main() -> None:
                 print(f"touch input lost: {err}", file=sys.stderr)
                 touch = None
                 continue
-            before = (view, offset, chosen, chosen_day, day_first)
+            before = (view, offset, chosen, chosen_day, day_first, alert_index)
             for down, up in pairs:
                 last_touch = time.monotonic()
                 x, y = to_picture(*down, xmax, ymax, flip_x, flip_y)
@@ -509,8 +570,14 @@ def main() -> None:
                     break
                 elif view == "detail":                    # any touch closes the card
                     view = back_to
-                elif view == "weather":
+                elif view in ("weather", "settings"):  # any touch closes these
                     view = "week"
+                elif view == "alerts":                    # a tap on "Next alert" pages, any other closes
+                    target = target_at(hits, x, y) if move == "tap" else None
+                    if isinstance(target, int):
+                        alert_index = target
+                    else:
+                        view = "week"
                 elif view == "day":
                     target = target_at(hits, x, y) if move == "tap" else None
                     if isinstance(target, Event):
@@ -526,16 +593,32 @@ def main() -> None:
                     target = None if name else target_at(hits, x, y)
                     if name == "weather":
                         view = "weather"
+                    elif name == "settings":
+                        view, settings_url, settings_note = "settings", None, ""
+                        address = remote.wifi_address()
+                        if address:
+                            try:
+                                settings_url = remote.settings_url(address, remote.new_code(cache))
+                            except OSError as err:
+                                print(f"settings code not saved: {type(err).__name__}", file=sys.stderr)
+                                settings_note = ("The code could not be made just now. Try again, or connect a "
+                                                 "computer with the USB cable and open the drive named FRAME.")
+                        elif not settings_url:
+                            settings_note = ("The frame is not on Wi-Fi. Connect a computer with the USB cable, "
+                                             "open the drive named FRAME and follow the link to the settings page.")
                     elif name:
                         offset = {"prev": offset - 1, "next": offset + 1, "today": 0}[name]
+                    elif target == "alerts":
+                        view, alert_index = "alerts", 0
                     elif isinstance(target, Event):
                         view, chosen, back_to = "detail", target, "week"
                     elif isinstance(target, date):
                         view, chosen_day, day_first = "day", target, 0
-            if (view, offset, chosen, chosen_day, day_first) != before:    # a touch that changed nothing
+            if (view, offset, chosen, chosen_day, day_first, alert_index) != before:    # a touch that changed nothing
                 dirty = True                                               # needs no new picture
     finally:
         backlight.restore()
+        remote.drop_code(cache)      # a code must not outlive the card that showed it
 
 
 if __name__ == "__main__":

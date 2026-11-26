@@ -3,7 +3,7 @@
 #   bash calendar_app/deploy.sh 'fe80::xxxx%en26'
 # Copies the skycal and skyadmin packages and their service units, creates the service user,
 # installs the firewall, the usb0 network file and the USB drive service from port/rootfs/files
-# (plus the dosfstools and mtools packages if the frame lacks them), and restarts the services. /etc/skycal/config.toml is created from config.example.toml only if it is missing;
+# (plus the python3-segno, dosfstools and mtools packages if the frame lacks them), and restarts the services. /etc/skycal/config.toml is created from config.example.toml only if it is missing;
 # an existing config (which holds the secret calendar address) is never read or replaced.
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -12,7 +12,7 @@ KEY=$HOME/.ssh/skylight_frame
 SSH=(ssh -i "$KEY" -o IdentitiesOnly=yes -o BatchMode=yes "root@$HOST")
 
 SYSFILES=../port/rootfs/files
-python3 -m py_compile skycal/*.py skyadmin/*.py
+python3 -m py_compile skycal/*.py skycal/themes/*.py skyadmin/*.py
 tar -c --exclude __pycache__ skycal skyadmin skycal.service skyadmin.service config.example.toml \
     -C "$SYSFILES" etc/nftables.conf etc/systemd/network/10-usb0.network \
     usr/local/sbin/skylight-usb-drive etc/systemd/system/skylight-usb-drive.service | "${SSH[@]}" '
@@ -25,14 +25,23 @@ tar -c --exclude __pycache__ skycal skyadmin skycal.service skyadmin.service con
     id skycal >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin skycal
     [ -e /etc/skycal/config.toml ] || install -m 600 "$new/config.example.toml" /etc/skycal/config.toml
     install -m 644 "$new/skycal.service" /etc/systemd/system/skycal.service
-    mkdir -p /opt/skycal/skycal
+    mkdir -p /opt/skycal/skycal/themes /opt/skycal/skycal/fonts
     install -m 644 "$new"/skycal/*.py /opt/skycal/skycal/
+    install -m 644 "$new"/skycal/themes/*.py /opt/skycal/skycal/themes/
+    install -m 644 "$new"/skycal/fonts/* /opt/skycal/skycal/fonts/
     install -m 644 "$new/skyadmin.service" /etc/systemd/system/skyadmin.service
     mkdir -p /opt/skycal/skyadmin
     install -m 644 "$new"/skyadmin/*.py /opt/skycal/skyadmin/
     install -m 644 "$new/etc/nftables.conf" /etc/nftables.conf
     nft -f /etc/nftables.conf
     install -m 644 "$new/etc/systemd/network/10-usb0.network" /etc/systemd/network/10-usb0.network
+    # QR codes for the settings gear of the calendar (skycal/remote.py): installed only if missing (that
+    # needs the internet). Without it the gear shows the address as text instead.
+    if ! python3 -c "import segno" >/dev/null 2>&1; then
+        apt-get update -qq || true
+        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends python3-segno >/dev/null \
+            || echo "python3-segno not installed: the settings gear will show the address without a QR code" >&2
+    fi
     systemctl daemon-reload
     systemctl enable skycal.service skyadmin.service >/dev/null 2>&1
     systemctl restart skycal.service skyadmin.service

@@ -1,11 +1,16 @@
 """Settings page for the frame: python3 -m skyadmin
 
-Served on the USB cable network only (the frame is 192.168.77.1 on usb0). Holding the cable is
-the authentication, so there is no login. Plain HTML forms, no JavaScript.
+Served on the USB cable network (the frame is 192.168.77.1 on usb0, port 80). Holding the cable
+is the authentication, so there is no login there. Plain HTML forms, no JavaScript.
+
+Also served on Wi-Fi, port 8080 (the firewall opens it on wlan0 only), but only to a phone that
+has scanned the QR code the calendar shows after a tap on its gear (skycal/remote.py): the code
+in it works once, within ten minutes, while the card is on screen, and gives that browser a
+session cookie good for an hour. Any other request on that port is turned away.
 
 Rules kept throughout: every change is a POST carrying a per-process token; requests whose Host
-is not the bind address are refused (DNS rebinding); feed addresses and passphrases are never
-logged or shown in full; system commands are argument lists, never a shell.
+is not the address they arrived on are refused (DNS rebinding); feed addresses and passphrases
+are never logged or shown in full; system commands are argument lists, never a shell.
 """
 import argparse
 import hmac
@@ -15,7 +20,9 @@ import secrets
 import subprocess
 import sys
 import threading
+import time
 import tomllib
+from collections import deque
 from datetime import datetime
 from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -23,10 +30,15 @@ from pathlib import Path
 from urllib.parse import parse_qs, quote, urlsplit
 from zoneinfo import ZoneInfo, available_timezones
 
+from skycal import remote as RM
+
 from . import settings as S
 
 WLAN = "wlan0"
 MAX_BODY = 16 * 1024
+SESSION_S = 3600             # how long a scanned QR code keeps a phone signed in
+MAX_SESSIONS = 16
+COOKIE = "skyadmin"
 
 # Status messages shown after a redirect. Only these codes are accepted from the URL.
 MESSAGES = {
@@ -45,6 +57,9 @@ MESSAGES = {
     "dup_feed": (False, "That calendar is already in the list."),
     "too_many_feeds": (False, f"The list is full ({S.MAX_FEEDS} calendars). Remove one first."),
     "no_feed": (False, "That calendar was not found. It may already have been removed."),
+    "color_saved": (True, "Colour saved. The calendar is restarting."),
+    "bad_color": (False, "That colour was not accepted."),
+    "bad_theme": (False, "Choose one of the listed styles."),
     "bad_tz": (False, "That time zone was not recognised. Use a name such as America/Los_Angeles or Europe/London."),
     "bad_weekday": (False, "Choose a day for the week to start on."),
     "bad_refresh": (False, f"The update interval must be a whole number from {S.REFRESH_MIN} to {S.REFRESH_MAX} minutes."),
@@ -138,6 +153,36 @@ class App:
         self.hosts = {self.bind, f"{self.bind}:{self.port}"}
         self.origins = {f"http://{h}" for h in self.hosts if self.port == 80 or ":" in h}
         self._zones = None
+        self.sessions: dict[str, float] = {}     # Wi-Fi session id -> when it ends (time.monotonic())
+        self.used = deque(maxlen=64)             # codes already redeemed
+        self.auth_lock = threading.Lock()
+
+    # ---- Wi-Fi sign-in by QR code ----
+
+    def redeem(self, code: str) -> str | None:
+        """A new session id for a code the calendar is showing, not yet used and not too old; else None."""
+        saved = RM.shown_code(self.state_dir)
+        if saved is None or not code or len(code) > 64:
+            return None
+        shown_code, shown = saved
+        if not hmac.compare_digest(code.encode(), shown_code.encode()) or not 0 <= time.time() - shown <= RM.CODE_S:
+            return None
+        with self.auth_lock:
+            if shown_code in self.used:
+                return None
+            self.used.append(shown_code)
+            now = time.monotonic()
+            self.sessions = {k: v for k, v in self.sessions.items() if v > now}
+            while len(self.sessions) >= MAX_SESSIONS:
+                del self.sessions[min(self.sessions, key=self.sessions.get)]
+            sid = secrets.token_urlsafe(32)
+            self.sessions[sid] = now + SESSION_S
+            return sid
+
+    def session_ok(self, sid: str) -> bool:
+        with self.auth_lock:
+            ends = self.sessions.get(sid) if sid else None
+            return ends is not None and ends > time.monotonic()
 
     def zones(self) -> list:
         if self._zones is None:
@@ -165,6 +210,8 @@ class App:
         try:
             for root, _dirs, files in os.walk(self.state_dir):
                 for name in files:
+                    if name.startswith(RM.CODE_FILE):     # the QR code's file, not a calendar
+                        continue
                     try:
                         newest = max(newest, os.stat(os.path.join(root, name)).st_mtime)
                     except OSError:
@@ -231,10 +278,23 @@ class App:
         b.append('<section id="calendar"><h2>Calendar</h2>')
         if feeds:
             b.append('<p class="hint">Calendars shown on the frame. Addresses are private, so only the start and end are shown.</p><ul>')
+            colors = cfg.get("feed_colors", {}) if isinstance(cfg.get("feed_colors", {}), dict) else {}
             for f in feeds:
-                b.append(f'<li><code>{escape(S.mask_feed(f))}</code><form method="post" action="/feed/remove">{h}'
-                         f'<input type="hidden" name="id" value="{S.feed_id(f)}"><button>Remove</button></form></li>')
+                fid = S.feed_id(f)
+                chosen = colors.get(fid) if isinstance(colors.get(fid), str) and S.valid_color(colors.get(fid)) else ""
+                state = "Colour on the frame" if chosen else "Colour: the style's own for this calendar"
+                reset = (f'<form method="post" action="/feed/color">{h}<input type="hidden" name="id" value="{fid}">'
+                         '<input type="hidden" name="color" value=""><button>Use the style\'s colour</button></form>' if chosen else "")
+                b.append(f'<li><code>{escape(S.mask_feed(f))}</code>'
+                         f'<form method="post" action="/feed/color">{h}<input type="hidden" name="id" value="{fid}">'
+                         f'<label class="c">{state} <input type="color" name="color" value="{chosen or "#006edc"}"></label>'
+                         f'<button>Set colour</button></form>{reset}'
+                         f'<form method="post" action="/feed/remove">{h}'
+                         f'<input type="hidden" name="id" value="{fid}"><button>Remove</button></form></li>')
             b.append("</ul>")
+            b.append('<p class="hint">An event that has a colour of its own in the calendar keeps it. Google Calendar does '
+                     'not put the colours you pick for single events into its iCalendar address, so those events show '
+                     'in their calendar\'s colour.</p>')
         else:
             b.append('<p class="hint">No calendars yet. Add one below.</p>')
         b.append(f'<form method="post" action="/feed/add" autocomplete="off">{h}'
@@ -271,7 +331,11 @@ class App:
 
         fx = " checked" if cfg.get("touch_flip_x", True) else ""
         fy = " checked" if cfg.get("touch_flip_y", True) else ""
+        current = cfg.get("theme", S.THEME_DEFAULT)
+        styles = "".join(f'<option value="{escape(n)}"{" selected" if n == current else ""}>{escape(lb)}</option>'
+                         for n, lb in S.THEMES)
         b.append(f'<section id="display"><h2>Display</h2><form method="post" action="/display/save">{h}'
+                 f'<label for="th">Style</label><select id="th" name="theme">{styles}</select>'
                  '<label for="ss">Show the screensaver after this many minutes without a touch</label>'
                  f'<input type="number" id="ss" name="screensaver_minutes" required min="0" max="{S.SAVER_MAX}" '
                  f'value="{escape(str(cfg.get("screensaver_minutes", S.SAVER_DEFAULT)))}">'
@@ -341,7 +405,35 @@ class App:
             if len(keep) == len(feeds):
                 return "no_feed"
             cfg["feeds"] = keep
+            colors = cfg.get("feed_colors")
+            if isinstance(colors, dict):
+                colors.pop(fid, None)
+                if not colors:
+                    del cfg["feed_colors"]
         return self._change_config(change, "feed_removed", "calendar")
+
+    def act_feed_color(self, form) -> tuple[str, str]:
+        fid, color = form("id"), form("color").strip().lower()
+
+        def change(cfg):
+            feeds = cfg.get("feeds", [])
+            if not isinstance(feeds, list) or not any(
+                    isinstance(f, str) and hmac.compare_digest(S.feed_id(f).encode(), fid.encode()) for f in feeds):
+                return "no_feed"
+            if color and not S.valid_color(color):
+                return "bad_color"
+            colors = cfg.get("feed_colors", {})
+            if not isinstance(colors, dict):
+                colors = {}
+            if color:
+                colors[fid] = color
+            else:
+                colors.pop(fid, None)
+            if colors:
+                cfg["feed_colors"] = colors
+            else:
+                cfg.pop("feed_colors", None)
+        return self._change_config(change, "color_saved", "calendar")
 
     def act_calendar_save(self, form) -> tuple[str, str]:
         tz, wd, rm = form("timezone").strip(), form("first_weekday"), form("refresh_minutes").strip()
@@ -368,13 +460,15 @@ class App:
         return self._change_config(change, "saved", "weather")
 
     def act_display_save(self, form) -> tuple[str, str]:
-        ss = form("screensaver_minutes").strip()
+        ss, theme = form("screensaver_minutes").strip(), form("theme")
 
         def change(cfg):
             if not re.fullmatch(r"[0-9]{1,4}", ss) or int(ss) > S.SAVER_MAX:
                 return "bad_saver"
+            if not S.valid_theme(theme):
+                return "bad_theme"
             cfg.update(touch_flip_x=form("touch_flip_x") == "1", touch_flip_y=form("touch_flip_y") == "1",
-                       screensaver_minutes=int(ss))
+                       screensaver_minutes=int(ss), theme=theme)
         return self._change_config(change, "saved", "display")
 
     def act_wifi_scan(self, form) -> tuple[str, str]:
@@ -416,12 +510,13 @@ class App:
         return "rebooting", ""
 
     POSTS = {"/wifi/scan": act_wifi_scan, "/wifi/join": act_wifi_join, "/feed/add": act_feed_add,
-             "/feed/remove": act_feed_remove, "/calendar/save": act_calendar_save,
+             "/feed/remove": act_feed_remove, "/feed/color": act_feed_color, "/calendar/save": act_calendar_save,
              "/weather/save": act_weather_save, "/display/save": act_display_save, "/do/restart": act_restart, "/do/reboot": act_reboot}
 
 
 class Handler(BaseHTTPRequestHandler):
     app: App
+    wifi = False                 # True on the Wi-Fi listener: every request needs a QR code session
     server_version = "skyadmin"
     sys_version = ""
     timeout = 15  # seconds a client may stall before its connection is dropped
@@ -437,11 +532,14 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Referrer-Policy", "no-referrer")
         super().end_headers()
 
-    def _send(self, code: int, body: str, ctype: str = "text/html; charset=utf-8", location: str = "") -> None:
+    def _send(self, code: int, body: str, ctype: str = "text/html; charset=utf-8", location: str = "",
+              cookie: str = "") -> None:
         data = body.encode("utf-8")
         self.send_response(code)
         if location:
             self.send_header("Location", location)
+        if cookie:
+            self.send_header("Set-Cookie", cookie)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
@@ -453,11 +551,47 @@ class Handler(BaseHTTPRequestHandler):
         self.close_connection = True
         self._send(code, text + "\n", "text/plain; charset=utf-8")
 
+    def _here(self) -> str:
+        """host:port this request arrived on (the Wi-Fi listener answers on whatever address the frame has)."""
+        return f"{self.connection.getsockname()[0]}:{self.server.server_address[1]}"
+
     def _host_ok(self) -> bool:
+        if self.wifi:
+            if self.headers.get("Host", "") == self._here():
+                return True
+            self._refuse(403, "Forbidden")
+            return False
         if self.headers.get("Host", "") in self.app.hosts:
             return True
         self._refuse(403, "Forbidden: open this page as http://" + self.app.bind)
         return False
+
+    def _signed_in(self) -> bool:
+        """Always on the USB cable; on Wi-Fi, only with the cookie of a scanned QR code."""
+        if not self.wifi:
+            return True
+        sid = ""
+        for part in self.headers.get("Cookie", "").split(";"):
+            name, _, value = part.strip().partition("=")
+            if name == COOKIE:
+                sid = value
+        if self.app.session_ok(sid):
+            return True
+        self._turn_away("This page opens from the frame.")
+        return False
+
+    def _turn_away(self, why: str) -> None:
+        self.close_connection = True
+        self._send(403, self.app.html("Frame settings", (
+            f"<main><h1>Frame settings</h1><p>{escape(why)}</p>"
+            "<p>Tap the gear at the top of the calendar on the frame, then scan the code it shows "
+            "with this phone's camera.</p></main>")))
+
+    def _scan(self, q: dict) -> None:
+        sid = self.app.redeem(q.get("c", [""])[0])
+        if sid is None:
+            return self._turn_away("That code has expired or has already been used.")
+        self._send(303, "", location="/", cookie=f"{COOKIE}={sid}; Path=/; Max-Age={SESSION_S}; HttpOnly; SameSite=Lax")
 
     def do_GET(self):
         if not self._host_ok():
@@ -467,6 +601,10 @@ class Handler(BaseHTTPRequestHandler):
             q = parse_qs(url.query, max_num_fields=5, errors="strict")
         except ValueError:
             return self._refuse(400, "Bad request")
+        if self.wifi and url.path == "/scan":        # GET only: a HEAD must not use up the code
+            return self._scan(q) if self.command == "GET" else self._refuse(405, "Method not allowed")
+        if not self._signed_in():
+            return
         if url.path == "/":
             ssid = q.get("ssid", [""])[0]
             return self._send(200, self.app.page(q.get("m", [""])[0], ssid if S.valid_ssid(ssid) else ""))
@@ -481,8 +619,11 @@ class Handler(BaseHTTPRequestHandler):
             return
         # Browsers send "Origin: null" on form posts from a page with Referrer-Policy: no-referrer
         # (as this one has), so null carries no information; the Host and token checks still apply.
+        if not self._signed_in():
+            return
         origin = self.headers.get("Origin")
-        if origin not in (None, "null") and origin not in self.app.origins:
+        origins = {f"http://{self._here()}"} if self.wifi else self.app.origins
+        if origin not in (None, "null") and origin not in origins:
             return self._refuse(403, "Forbidden")
         action = App.POSTS.get(urlsplit(self.path).path)
         if action is None:
@@ -508,19 +649,34 @@ class Handler(BaseHTTPRequestHandler):
         self._send(303, "", location=f"/?m={code}" + (f"#{anchor}" if anchor else ""))
 
 
+class WifiHandler(Handler):
+    wifi = True
+
+
 def main() -> None:
-    ap = argparse.ArgumentParser(prog="skyadmin", description="Settings page for the frame, for the USB cable network.")
+    ap = argparse.ArgumentParser(prog="skyadmin", description="Settings page for the frame, for the USB cable network "
+                                 "and, after a QR code from the frame, Wi-Fi.")
     ap.add_argument("--bind", default="192.168.77.1", help="IPv4 address to listen on (also the only accepted Host)")
     ap.add_argument("--port", type=int, default=80)
     ap.add_argument("--config", type=Path, default=Path("/etc/skycal/config.toml"))
     ap.add_argument("--wpa-conf", type=Path, default=Path("/etc/wpa_supplicant/wpa_supplicant-wlan0.conf"))
     ap.add_argument("--state-dir", type=Path, default=Path("/var/lib/skycal"))
+    ap.add_argument("--wifi-bind", default="0.0.0.0", help="address of the listener for phones on Wi-Fi")
+    ap.add_argument("--wifi-port", type=int, default=RM.WIFI_PORT, help="its port; 0 turns it off")
     ap.add_argument("--dry-run", action="store_true", help="log system commands instead of running them")
     args = ap.parse_args()
     Handler.app = App(args)
     ThreadingHTTPServer.daemon_threads = True
     httpd = ThreadingHTTPServer((args.bind, args.port), Handler)
     log(f"skyadmin listening on http://{args.bind}:{args.port}" + (" (dry run)" if args.dry_run else ""))
+    if args.wifi_port:
+        try:
+            wifi = ThreadingHTTPServer((args.wifi_bind, args.wifi_port), WifiHandler)
+        except OSError as err:
+            log(f"no listener for Wi-Fi: {err}")
+        else:
+            threading.Thread(target=wifi.serve_forever, daemon=True).start()
+            log(f"skyadmin listening for phones on Wi-Fi on port {args.wifi_port}")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

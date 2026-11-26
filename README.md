@@ -193,7 +193,7 @@ After this there is no adb. Access is SSH, over Wi-Fi or the USB cable.
 
 | Check | Command | Expected |
 |---|---|---|
-| Render a week on the Mac | `cd calendar_app && python3 -m venv .venv && .venv/bin/pip install pillow icalendar recurring-ical-events && cp config.example.toml config.toml && .venv/bin/python -m skycal --config config.toml --png week.png` (add `--screen weather`, `saver`, `day` or `detail` for the other screens) | `week.png: week, week of ..., N events, fresh` and a 1280x800 picture |
+| Render a week on the Mac | `cd calendar_app && python3 -m venv .venv && .venv/bin/pip install pillow icalendar recurring-ical-events segno && cp config.example.toml config.toml && .venv/bin/python -m skycal --config config.toml --png week.png` (add `--screen weather`, `saver`, `day`, `detail` or `alerts` for the other screens, `--theme <name>` for another style) | `week.png: week, week of ..., N events, fresh` and a 1280x800 picture |
 | Packer against a stock image | `python3 port/rkimg.py selftest <backup>/partitions/recovery.img` | `True` twice |
 | Kernel build | Step 4 | `OK: zImage-dtb ...` |
 | Root filesystem build | Step 7 | `OK: port/images/rootfs.ext4` |
@@ -209,16 +209,21 @@ For owners, no terminal needed:
 |---|---|
 | Status | Wi-Fi network and state, the frame's address on Wi-Fi, when the calendars were last fetched, kernel version |
 | Wi-Fi | Search for networks and join one. Networks the frame already knows are kept |
-| Calendar | Add and remove calendar feeds (https only; shown masked, never in full), time zone, first day of the week, refresh interval |
-| Weather | The town for the forecast and Fahrenheit or Celsius. Empty town: no weather |
-| Display | Minutes without a touch before the screensaver (0 turns it off). Flip the touch axes, for when taps land in the wrong place |
+| Calendar | Add and remove calendar feeds (https only; shown masked, never in full), a colour for each calendar, time zone, first day of the week, refresh interval |
+| Weather | The town for the forecast and Fahrenheit or Celsius. Empty town: no weather and no weather alerts |
+| Display | The style (see "Styles"). Minutes without a touch before the screensaver (0 turns it off). Flip the touch axes, for when taps land in the wrong place |
 | Maintenance | Restart the calendar, restart the frame (each asks for confirmation) |
 
 A save takes effect at once: the page rewrites `/etc/skycal/config.toml` or the Wi-Fi file and restarts the service concerned. Comments in `config.toml` are not kept when the page rewrites it.
 
+### From a phone on the same Wi-Fi
+
+Once the frame is on Wi-Fi, the cable is not needed: tap the gear at the top of the calendar and point a phone's camera at the QR code that appears. The phone must be on the same Wi-Fi network. It opens the same page, at `http://<the frame's Wi-Fi address>:8080`, and stays signed in for an hour. When the frame is not on Wi-Fi, the gear says so instead.
+
 ### How it is protected
 
-- There is no login: holding the cable is the key. The page (`skyadmin`) listens on the cable's address only, and the firewall admits it from `usb0` only, so it is unreachable over Wi-Fi.
+- Over the cable there is no login: holding the cable is the key. The page (`skyadmin`) listens on the cable's address, port 80, and the firewall admits that port from `usb0` only.
+- Over Wi-Fi, seeing the frame is the key. The page also listens on port 8080, which the firewall admits from `wlan0` only, and turns away every request there that does not carry the code from the QR code or the session it leads to. The code is random (128 bits), works once, only while the card is on screen and for at most 10 minutes; the session lasts an hour and is held in memory only, so a restart of the page ends it. This is plain HTTP: someone able to read the Wi-Fi traffic could see the session and the page, as with any device's page on a home network.
 - The computer keeps its own internet connection. The frame hands out an address, but no route and no DNS.
 - Calendar addresses are secrets, so the page never shows one in full. A Wi-Fi passphrase is stored only as its derived key.
 - Every change needs a token that only the page itself carries, and requests that name another host are refused, so another website open in the same browser cannot change settings.
@@ -256,12 +261,22 @@ A frame installed from a current Debian image and kernel has all of it from the 
 | Tap an event | Its details: when, where and its notes. Tap anywhere to close |
 | Tap a day's heading, or "+N more" | Every event of that day as a list; tap one for its details |
 | Tap ‹, ›, or swipe sideways | Another week. "Today" goes back; so does five minutes without a touch |
+| Tap the red, orange or amber band at the foot of the week (only while a weather alert is in force) | The alert in full: what, where, until when, what to do. With several alerts, a row leads to the next. Tap anywhere else to close |
+| Tap the gear (top right, left of the weather) | A QR code that opens the settings page on a phone on the same Wi-Fi (see "From a phone on the same Wi-Fi"). Tap anywhere to close; it closes by itself after five minutes, and its code stops working then |
 | Tap the weather button (top right, shows the current conditions) | Hour by hour for today and tomorrow: conditions, temperature, chance of rain, with the day's high, low, sunrise and sunset |
-| Leave it alone | After 10 minutes (changeable) the screensaver: a dimmed, dark screen with the time, the date, the weather and the next three events. Any touch brings the calendar back |
+| Leave it alone | After 10 minutes (changeable) the screensaver: a dimmed, dark screen with the time, the date, the weather, any weather alert and the next events. Any touch brings the calendar back |
 
 Finished events are drawn faded and the one in progress is outlined. The week view was checked on the reference frame on 2026-11-19 (taps and swipes fed in through the touch device, screen read back from the framebuffer): event details, day list, swipe, screensaver with the backlight going from 128 to 25 and back (also after a service restart while dimmed). The forecast screen, the weather button and the screensaver's weather line were checked the same way with a town saved through the settings page.
 
-The weather is off until a town is set on the settings page. With a town set, the frame sends the town's name to `geocoding-api.open-meteo.com` once and its coordinates to `api.open-meteo.com` every 30 minutes (https, no account). Those are the frame's only requests besides the calendar feeds.
+The weather is off until a town is set on the settings page. With a town set, the frame sends the town's name to `geocoding-api.open-meteo.com` once and its coordinates to `api.open-meteo.com` every 30 minutes, and the same coordinates to `api.weather.gov` (the US National Weather Service, NOAA) every 5 minutes for the alerts in force there (https, no account; the User-Agent names only the program). Those are the frame's only requests besides the calendar feeds. Outside the United States the National Weather Service answers with an error and no alert is ever shown. An alert disappears when it ends, also when the frame is offline and works from its last saved copy.
+
+### Styles
+
+The style picked on the settings page decides how every screen looks; what is on them, and where you tap, stays the same. `original` is the look described above. The others are dark: `tactical` (a sci-fi game menu: navy, cyan, corner brackets), `sports` (a racing or football game menu: slanted panels, bold italic numbers), `fantasy` (a dark fantasy game menu: charcoal and gold), `neon` (a cyberpunk game menu: black, yellow, magenta) and `starship` (a 1980s-90s TV starship console: black with rounded pastel bars). Their fonts are in `calendar_app/skycal/fonts/` under the SIL Open Font License (the `OFL-*.txt` files there). A style that fails to load, or fails while drawing a screen, gives way to `original` until the calendar restarts.
+
+### Colours of events
+
+Each calendar is drawn in one colour: the one picked for it on the settings page, else the style's own colour for the calendar's place in the list. An event that carries a colour of its own in its feed (the iCalendar `COLOR` property) keeps it, and a feed that names a colour for its whole calendar (`COLOR` or `X-APPLE-CALENDAR-COLOR`) is used when nothing was picked. Google Calendar's iCalendar addresses carry no colours at all (checked on 2026-11-25 on a 1,140-event calendar in which some events have colours set in Google Calendar), so those per-event colours cannot reach the frame through a feed.
 
 ## Day to day
 
@@ -269,7 +284,7 @@ The weather is off until a town is set on the settings page. With a town set, th
 |---|---|
 | Update the calendar app | On the Mac: `bash calendar_app/deploy.sh '<frame address>'` (never touches the config on the frame) |
 | Update the kernel | See "Updating the kernel" |
-| Change Wi-Fi, calendars, time zone, week start, weather town or screensaver time | Plug in the USB cable and open the settings page (see "Settings page over USB"). By hand: edit `/etc/skycal/config.toml` on the frame, `systemctl restart skycal` |
+| Change Wi-Fi, calendars and their colours, time zone, week start, weather town, style or screensaver time | Plug in the USB cable and open the settings page (see "Settings page over USB"). By hand: edit `/etc/skycal/config.toml` on the frame, `systemctl restart skycal` |
 | Update the settings page | The same `deploy.sh` run as the calendar app |
 | Logs | `journalctl -u skycal` on the frame; `journalctl -u skyadmin` for the settings page (it logs no calendar addresses or passphrases) |
 | OS updates | Automatic (unattended-upgrades) |
@@ -342,7 +357,7 @@ recon/.venv/bin/python -I recon/extract.py <backup> recon/out
 
 ## License and warranty
 
-MIT license, see `LICENSE`. The board device tree (`port/dts/`) is additionally offered under GPL-2.0-or-later, as its header says, to match the Linux kernel.
+MIT license, see `LICENSE`. The fonts in `calendar_app/skycal/fonts/` are under the SIL Open Font License 1.1 (one `OFL-*.txt` per family). The board device tree (`port/dts/`) is additionally offered under GPL-2.0-or-later, as its header says, to match the Linux kernel.
 
 There is no warranty of any kind. This project replaces the operating system of a consumer device by writing to its flash storage. Following this guide can leave a frame unable to start, erase what is stored on it, and will void the manufacturer's warranty and end the vendor's service on that frame. Several procedures here are marked untested. Nobody involved in this project is liable for any damage or loss. If you follow it, you do so entirely at your own risk; make and keep the backup in step 1 first.
 

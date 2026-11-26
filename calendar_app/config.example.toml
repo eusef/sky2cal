@@ -10,6 +10,12 @@ feeds = [
 # weather_place = "Springfield, Illinois"   # town for the hourly forecast (from open-meteo.com); also a postal
 #                                  # code or "latitude, longitude". Not set: no weather, nothing is sent
 # weather_units = "fahrenheit"     # or "celsius"
+#                                  # weather_place in the United States also brings the NOAA weather
+#                                  # alerts for it (from api.weather.gov)
+# theme = "original"               # or tactical, sports, fantasy, neon, starship (skycal/themes/__init__.py)
 # screensaver_minutes = 10         # minutes without a touch before the screensaver; 0 = never
 # touch_flip_x = true              # touch panel orientation against the framebuffer; both default
 # touch_flip_y = true              # to true, which is what the Skylight Frame 2 needs
+# [feed_colors]                    # a colour per calendar, keyed by the first 16 hex digits of the SHA-256
+# 4f608dad13bb71f2 = "#e67c73"     # of its address (the settings page sets these); an event with a COLOR
+#                                  # of its own in the feed keeps that
