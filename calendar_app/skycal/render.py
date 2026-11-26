@@ -488,10 +488,12 @@ def render_weather(weather: Weather | None, now: datetime, message: str = "", al
     return _draw("render_weather", (weather, now, message, list(alerts)))
 
 
-def render_settings(base: Image.Image, url: str | None, now: datetime, message: str = "") -> Image.Image:
+def render_settings(base: Image.Image, url: str | None, now: datetime, message: str = "",
+                    hits: list | None = None) -> Image.Image:
     """A card over the week with the QR code of the settings page (`url`), or `message` when
-    there is no address to show (the frame is not on Wi-Fi)."""
-    return _draw("render_settings", (base, url, now, message))
+    there is no address to show (the frame is not on Wi-Fi), and a button for each style
+    (hit target: ("theme", name)); the style in use is marked."""
+    return _draw("render_settings", (base, url, now, message, hits), hits)
 
 
 def render_saver(now: datetime, events: list[Event], weather: Weather | None, alerts: list | tuple = ()) -> Image.Image:

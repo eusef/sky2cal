@@ -31,6 +31,7 @@ from urllib.parse import parse_qs, quote, urlsplit
 from zoneinfo import ZoneInfo, available_timezones
 
 from skycal import remote as RM
+from skycal import themes as TH
 
 from . import settings as S
 
@@ -210,7 +211,7 @@ class App:
         try:
             for root, _dirs, files in os.walk(self.state_dir):
                 for name in files:
-                    if name.startswith(RM.CODE_FILE):     # the QR code's file, not a calendar
+                    if name.startswith((RM.CODE_FILE, TH.CHOICE_FILE)):   # the QR code's and the look's files, not calendars
                         continue
                     try:
                         newest = max(newest, os.stat(os.path.join(root, name)).st_mtime)
@@ -331,7 +332,7 @@ class App:
 
         fx = " checked" if cfg.get("touch_flip_x", True) else ""
         fy = " checked" if cfg.get("touch_flip_y", True) else ""
-        current = cfg.get("theme", S.THEME_DEFAULT)
+        current = TH.chosen(self.state_dir, cfg.get("theme", S.THEME_DEFAULT))   # also a look picked on the frame
         styles = "".join(f'<option value="{escape(n)}"{" selected" if n == current else ""}>{escape(lb)}</option>'
                          for n, lb in S.THEMES)
         b.append(f'<section id="display"><h2>Display</h2><form method="post" action="/display/save">{h}'
@@ -361,7 +362,9 @@ class App:
 
     # ---- actions: each returns (message code, page anchor) ----
 
-    def _change_config(self, change, ok_code: str, anchor: str) -> tuple[str, str]:
+    def _change_config(self, change, ok_code: str, anchor: str, saved=None) -> tuple[str, str]:
+        """Apply `change` to the config, write it and restart the calendar. `saved`, if given, is
+        called after the write and before the restart."""
         with self.lock:
             try:
                 cfg = S.load_config(self.config)
@@ -375,6 +378,8 @@ class App:
             except (OSError, ValueError, TypeError) as e:
                 log(f"config write failed: {type(e).__name__}")
                 return "write_failed", anchor
+            if saved:
+                saved()
             ok, _ = self.sys.run("systemctl", "restart", "skycal.service", timeout=60)
             return (ok_code if ok else "saved_no_restart"), anchor
 
@@ -469,7 +474,13 @@ class App:
                 return "bad_theme"
             cfg.update(touch_flip_x=form("touch_flip_x") == "1", touch_flip_y=form("touch_flip_y") == "1",
                        screensaver_minutes=int(ss), theme=theme)
-        return self._change_config(change, "saved", "display")
+
+        def drop_frame_pick():      # the style chosen here now wins over one picked on the frame
+            try:
+                TH.forget(self.state_dir)
+            except OSError as err:
+                log(f"look picked on the frame not dropped: {type(err).__name__}")
+        return self._change_config(change, "saved", "display", drop_frame_pick)
 
     def act_wifi_scan(self, form) -> tuple[str, str]:
         with self.lock:

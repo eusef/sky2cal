@@ -17,10 +17,13 @@ import urllib.request
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
+from time import time as time_now
 from zoneinfo import ZoneInfo
 
 import icalendar
 import recurring_ical_events
+
+from .smallfile import read_capped
 
 MAX_FEED_BYTES = 20 * 1024 * 1024
 MAX_NOTES = 1200
@@ -28,6 +31,7 @@ _BREAK = re.compile(r"<(?:br|/p|/div|/li)\s*/?>", re.I)    # one \s* only: two i
 _TAG = re.compile(r"</?(?:a|b|i|u|p|br|div|span|ul|ol|li|html|body|head|strong|em|h[1-6]|font|table|tbody|tr|td|th|"
                   r"blockquote|pre|code|hr|img|small|sub|sup|s)\b[^<>]{0,2000}>", re.I)
 MAX_TITLE = 300
+MAX_WHERE = 300
 MAX_COLOR = 40                       # characters of a COLOR value that are kept; render.py checks the rest
 
 
@@ -125,7 +129,7 @@ def events_between(ics: bytes, first: date, last: date, tz: ZoneInfo, cal: int =
         end_prop = comp.get("DTEND")
         title = " ".join(str(comp.get("SUMMARY", "")).split())[:MAX_TITLE] or "(no title)"   # always one line
         where, notes = comp.get("LOCATION", ""), comp.get("DESCRIPTION", "")
-        where = plain(str(where[0] if isinstance(where, list) and where else where), 300)   # a repeated property
+        where = plain(str(where[0] if isinstance(where, list) and where else where), MAX_WHERE)   # a repeated property
         notes = plain(str(notes[0] if isinstance(notes, list) and notes else notes))        # comes as a list
         tint = _color(comp.get("COLOR"))
         if not isinstance(start, datetime):  # all-day: plain dates, in the viewer's zone
@@ -164,6 +168,10 @@ def read_feeds(urls: list, cache_dir: Path, first: date, last: date, tz: ZoneInf
 
 
 SNAPSHOT = "events.json"
+# Parsed JSON takes up to about 32 times its size in memory (a file of nothing but `[{}]`), so a
+# bigger snapshot is not read at all (the calendar then waits for the feeds instead). The one
+# kept on the frame for 1,360 events was 200 KB (2026-11-25): this leaves room for ten times that.
+SNAPSHOT_MAX_BYTES = 2 * 1024 * 1024
 
 
 def _snap_time(text: str, tz: ZoneInfo) -> datetime:
@@ -193,25 +201,48 @@ def save_snapshot(urls: list, cache_dir: Path, data: list, tz: ZoneInfo) -> None
     tmp.replace(path)
 
 
-def load_snapshot(urls: list, cache_dir: Path, tz: ZoneInfo) -> list | None:
+def _snap_event(row: list, i: int, lo: datetime, hi: datetime, tz: ZoneInfo) -> Event | None:
+    """One kept event, held to the same limits events_between() applies, since the file could
+    have been changed; None when it lies outside its window."""
+    s, e, a, t, w, n, c, cc = row
+    start, end, all_day = _snap_time(s, tz), _snap_time(e, tz), bool(a)
+    if all_day and end <= start:
+        end = start + timedelta(days=1)
+    if not (start < hi and (end > lo or start >= lo)):
+        return None
+    title = " ".join(str(t)[:4 * MAX_TITLE].split())[:MAX_TITLE] or "(no title)"
+    return Event(start, end, all_day, title, i, str(w)[:MAX_WHERE + 1], str(n)[:MAX_NOTES + 1],   # +1: plain()'s "…"
+                 str(c)[:MAX_COLOR], str(cc)[:MAX_COLOR])
+
+
+def load_snapshot(urls: list, cache_dir: Path, tz: ZoneInfo, max_age: float) -> list | None:
     """The entries save_snapshot() kept, in the order of `urls`, shaped as read_feeds() returns them.
     Their ics is b"" (not None): gather() then uses the kept events inside their window, and
     counts the feed as missing only outside it, until the real read arrives. A feed without
-    kept events gets an entry of Nones. None when nothing usable was kept."""
+    kept events gets an entry of Nones. None when nothing usable was kept.
+
+    A snapshot older than `max_age` seconds (longer than a running calendar ever goes between
+    two writes of it) gives feeds that were fresh when it was saved its own time as saved_at,
+    so the week shows them as saved data, not as current. The file is read only within limits
+    (read_capped), so a planted one cannot hang the calendar or use up its memory."""
     try:
-        kept = json.loads((Path(cache_dir) / SNAPSHOT).read_text())
+        raw, written = read_capped(Path(cache_dir) / SNAPSHOT, SNAPSHOT_MAX_BYTES)
+        kept = json.loads(raw)
         if kept.get("timezone") != tz.key:          # all-day events are midnights in that zone
             return None
+        old = datetime.fromtimestamp(written, tz) if time_now() - written > max_age else None
         data, found = [], False
         for i, url in enumerate(urls):
             entry = kept["feeds"].get(feed_key(url))
             if not entry:
                 data.append((None, None, None, date.min, date.min))
                 continue
-            saved_at = _snap_time(entry["saved_at"], tz) if entry["saved_at"] else None
-            events = [Event(_snap_time(s, tz), _snap_time(e, tz), bool(a), str(t), i, str(w), str(n), str(c), str(cc))
-                      for s, e, a, t, w, n, c, cc in entry["events"]]
-            data.append((b"", saved_at, events, date.fromisoformat(entry["first"]), date.fromisoformat(entry["last"])))
+            saved_at = _snap_time(entry["saved_at"], tz) if entry["saved_at"] else old
+            first, last = date.fromisoformat(entry["first"]), date.fromisoformat(entry["last"])
+            lo = datetime.combine(first, time.min, tz)
+            hi = datetime.combine(last + timedelta(days=1), time.min, tz)
+            events = [ev for row in entry["events"] if (ev := _snap_event(row, i, lo, hi, tz)) is not None]
+            data.append((b"", saved_at, events, first, last))
             found = True
         return data if found else None
     except FileNotFoundError:
@@ -221,7 +252,10 @@ def load_snapshot(urls: list, cache_dir: Path, tz: ZoneInfo) -> list | None:
         return None
 
 
-def read_feeds_apart(urls: list, cache_dir: Path, first: date, last: date, tz: ZoneInfo, timeout: float = 600.0) -> list[tuple]:
+READ_TIMEOUT_S = 600.0
+
+
+def read_feeds_apart(urls: list, cache_dir: Path, first: date, last: date, tz: ZoneInfo, timeout: float = READ_TIMEOUT_S) -> list[tuple]:
     """read_feeds() in a process of its own. Reading a large calendar is seconds of plain
     Python, and in a thread that more than doubles the time of every picture drawn meanwhile
     (measured on the frame, 2026-11-19). Raises when the other process fails or takes too long.

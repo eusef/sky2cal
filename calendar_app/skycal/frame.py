@@ -7,9 +7,11 @@ top edge on the right, so the 1280x800 picture is turned a quarter turn before i
 
 Screens: the week (tap an event for its details, a day's heading or "+N more" for the whole
 day, the weather button for the hourly forecast, the alert band for the weather alerts, the
-gear for a QR code that opens the settings page on a phone (remote.py); swipe sideways to change week), and a screensaver that takes over after a while without a
-touch and dims the backlight. Any touch ends the screensaver. SIGUSR1 starts it at once (for
-testing). How the screens look is the theme named in the config (`theme`).
+gear for a QR code that opens the settings page on a phone (remote.py) and buttons that change
+the look at once; swipe sideways to change week), and a screensaver that takes over after a
+while without a touch and dims the backlight. Any touch ends the screensaver. SIGUSR1 starts it
+at once (for testing). How the screens look is the theme named in the config (`theme`), or the
+one last picked on the frame while the config still names the same theme (themes.chosen()).
 """
 from __future__ import annotations
 
@@ -30,11 +32,11 @@ from zoneinfo import ZoneInfo
 from PIL import Image, ImageChops
 
 from . import alerts as al
-from . import remote
+from . import remote, themes
 from . import weather as wx
-from .feed import Event, events_between, feed_key, load_snapshot, read_feeds, read_feeds_apart
+from .feed import READ_TIMEOUT_S, Event, events_between, feed_key, load_snapshot, read_feeds, read_feeds_apart
 from .render import (NAV, H, W, configure, fmt_time, render_alerts, render_day, render_detail, render_saver,
-                     render_settings, render_weather, render_week, week_start)
+                     render_settings, render_weather, render_week, theme, week_start)
 
 FB_W, FB_H = H, W            # 800 x 1280
 TAP_MARGIN = 24              # px of slack around each button
@@ -218,8 +220,10 @@ def fetch_loop(feeds: list, cache: Path, refresh_s: int, tz: ZoneInfo, results: 
     window last day).
 
     Before the first read it hands over the events the last read kept (load_snapshot), so
-    after a restart the week shows them within a second instead of after that read."""
-    kept = load_snapshot(feeds, cache, tz)
+    after a restart the week shows them within a second instead of after that read. It is
+    written at the end of each read and the next read starts refresh_s later, so a healthy one
+    is at most refresh_s plus a read old; 5 more minutes cover a restart or a reboot."""
+    kept = load_snapshot(feeds, cache, tz, max_age=refresh_s + READ_TIMEOUT_S + 300)
     if kept is not None:
         results.put(("feeds", (kept, time.time())))
         os.write(wake_fd, b"x")
@@ -383,7 +387,8 @@ def main() -> None:
     tz = ZoneInfo(cfg["timezone"])
     cache = args.cache_dir or Path(cfg.get("cache_dir", "cache"))
     remote.drop_code(cache)          # one left behind by a calendar that stopped with the card open
-    print(f"theme: {configure(str(cfg.get('theme', 'original')), feed_colors(cfg))}", file=sys.stderr)
+    configured = str(cfg.get("theme", themes.DEFAULT))
+    print(f"theme: {configure(themes.chosen(cache, configured), feed_colors(cfg))}", file=sys.stderr)
     refresh_s = max(1, int(cfg.get("refresh_minutes", 10))) * 60
     # Measured on the frame (2026-11-11): the touch panel is turned half a turn against the
     # framebuffer, so both axes are flipped unless the config says otherwise.
@@ -506,7 +511,7 @@ def main() -> None:
                             alert_index = alert_index if alert_index < len(running) else 0
                             img = render_alerts(img, running, now, hits, alert_index)
                         elif view == "settings":
-                            img = render_settings(img, settings_url, now, settings_note)
+                            img = render_settings(img, settings_url, now, settings_note, hits)
                         else:
                             view, hits = "week", week_hits
                     show(img, args.fb)
@@ -559,7 +564,7 @@ def main() -> None:
                 print(f"touch input lost: {err}", file=sys.stderr)
                 touch = None
                 continue
-            before = (view, offset, chosen, chosen_day, day_first, alert_index)
+            before = (view, offset, chosen, chosen_day, day_first, alert_index, theme().name)
             for down, up in pairs:
                 last_touch = time.monotonic()
                 x, y = to_picture(*down, xmax, ymax, flip_x, flip_y)
@@ -570,8 +575,20 @@ def main() -> None:
                     break
                 elif view == "detail":                    # any touch closes the card
                     view = back_to
-                elif view in ("weather", "settings"):  # any touch closes these
+                elif view == "weather":                   # any touch closes it
                     view = "week"
+                elif view == "settings":                  # a tap on a look switches to it, any other closes
+                    target = target_at(hits, x, y) if move == "tap" else None
+                    if isinstance(target, tuple) and target[0] == "theme":
+                        if target[1] != theme().name:
+                            name = configure(target[1], feed_colors(cfg))
+                            stamp += 1                    # the weeks drawn so far are in the old look
+                            try:
+                                themes.choose(cache, name, configured)
+                            except OSError as err:
+                                print(f"look not saved: {type(err).__name__}", file=sys.stderr)
+                    else:
+                        view = "week"
                 elif view == "alerts":                    # a tap on "Next alert" pages, any other closes
                     target = target_at(hits, x, y) if move == "tap" else None
                     if isinstance(target, int):
@@ -614,7 +631,7 @@ def main() -> None:
                         view, chosen, back_to = "detail", target, "week"
                     elif isinstance(target, date):
                         view, chosen_day, day_first = "day", target, 0
-            if (view, offset, chosen, chosen_day, day_first, alert_index) != before:    # a touch that changed nothing
+            if (view, offset, chosen, chosen_day, day_first, alert_index, theme().name) != before:    # a touch that changed nothing
                 dirty = True                                               # needs no new picture
     finally:
         backlight.restore()
