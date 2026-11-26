@@ -14,7 +14,8 @@ Restart=always
 RestartSec=5
 NoNewPrivileges=yes
 ProtectSystem=strict
-ReadWritePaths=/etc/skycal /etc/wpa_supplicant
+# /var/lib/skycal: to drop a look picked on the frame when the page saves a style (skycal/themes).
+ReadWritePaths=/etc/skycal /etc/wpa_supplicant -/var/lib/skycal
 ProtectHome=yes
 PrivateTmp=yes
 # AF_UNIX for systemctl, AF_NETLINK for iw and ip.

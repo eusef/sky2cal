@@ -574,9 +574,17 @@ class Original:
                       "Your phone must be on the same Wi-Fi as the frame.",
                       "The code works once, and only while it is on screen.")
 
-    def render_settings(self, base: Image.Image, url: str | None, now: datetime, message: str) -> Image.Image:
+    STYLE_COLS, STYLE_H, STYLE_GAP = 3, 64, 16      # the style buttons under the code
+
+    def render_settings(self, base: Image.Image, url: str | None, now: datetime, message: str,
+                        hits: list | None = None) -> Image.Image:
         """A card with the QR code on the left and how to use it on the right; only words when
-        there is no code to show. The code is always black on white, whatever the style."""
+        there is no code to show. The code is always black on white, whatever the style.
+        Below them, a button for each style, the one in use ringed in the accent colour."""
+        from . import buttons
+        styles = buttons()
+        rows = -(-len(styles) // self.STYLE_COLS)
+        style_h = 44 + rows * self.STYLE_H + (rows - 1) * self.STYLE_GAP
         probe = ImageDraw.Draw(base)
         width = 880
         qr = R.qr_image(url, 380) if url else None
@@ -589,7 +597,8 @@ class Original:
         paras = [wrap(probe, t, body_f, text_w, 3) for t in (self.SETTINGS_STEPS if qr else (message,))]
         address = wrap(probe, url, small_f, text_w, 3) if url else []
         text_h = 40 * len(title) + 14 + sum(28 * len(p) + 14 for p in paras) + (10 + 22 * len(address) if address else 0)
-        height = max(qr.height if qr else 0, text_h) + 40 + 70
+        top_h = max(qr.height if qr else 0, text_h)
+        height = 40 + top_h + 30 + style_h + 70
         img, d, box = self.card(base, height, width)
         x0, y0, x1, y1 = box
         if qr:
@@ -608,7 +617,23 @@ class Original:
         for line in address:
             _text(d, (x, y), line, font=small_f, fill=self.MUTED)
             y += 22
-        self.card_hint(d, box, "Tap anywhere to close")
+        y = y0 + 40 + top_h + 30
+        _text(d, (x0 + 40, y), "Pick a look", font=self.f(24, True), fill=self.INK)
+        y += 44
+        cols, gap = self.STYLE_COLS, self.STYLE_GAP
+        bw = (width - 80 - (cols - 1) * gap) // cols
+        for i, (name, label) in enumerate(styles):
+            bx = x0 + 40 + (i % cols) * (bw + gap)
+            by = y + (i // cols) * (self.STYLE_H + gap)
+            button = (bx, by, bx + bw, by + self.STYLE_H)
+            if name == self.name:
+                d.rounded_rectangle((bx - 7, by - 7, bx + bw + 7, by + self.STYLE_H + 7), radius=18,
+                                    outline=self.ACCENT, width=4)
+            self.button(d, button, label, 24)
+            if hits is not None:      # half the gap around each button counts as a tap on it
+                half = gap // 2
+                hits.append((bx - half, by - half, bx + bw + half, by + self.STYLE_H + half, ("theme", name)))
+        self.card_hint(d, box, "Tap a look to use it. Tap anywhere else to close.")
         return img
 
     @staticmethod
